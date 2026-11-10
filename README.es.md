@@ -19,6 +19,7 @@ compila para la Pi 3, la familia Pi 4 (incluidas la 400 y la CM4) y la Pi 5.
 - [Hardware](#hardware)
 - [Inicio rápido](#inicio-rápido)
 - [Entorno de compilación](#entorno-de-compilación)
+- [Compilar en GitHub](#compilar-en-github)
 - [Compilar desde cero](#compilar-desde-cero)
 - [Ponerlo en una tarjeta](#ponerlo-en-una-tarjeta)
 - [Configuración: `boot.conf`](#configuración-bootconf)
@@ -119,13 +120,16 @@ van al lado.
 | `mtools`, `dosfstools` | escribir la tarjeta FAT32 |
 | `parted` | particionar la tarjeta |
 | `curl` | descargar el toolchain |
+| `texinfo` | newlib genera su documentación con `makeinfo`, y falla sin él |
+| `cmake` | compilar libc++, y Munt y FluidSynth para el MIDI |
+| `wget` | el `boot/Makefile` de Circle descarga el firmware con él |
 
 ```bash
 # Arch / CachyOS
-sudo pacman -S --needed base-devel git python mtools dosfstools parted curl
+sudo pacman -S --needed base-devel git python mtools dosfstools parted curl texinfo cmake wget
 
 # Debian / Ubuntu
-sudo apt install build-essential git python3 mtools dosfstools parted curl
+sudo apt install build-essential git python3 mtools dosfstools parted curl texinfo cmake wget
 ```
 
 Unos 8 GB de disco para los árboles de compilación y el toolchain.
@@ -157,6 +161,19 @@ make TOOLCHAIN_DIR=/ruta/con/arm-gnu-toolchain-*
 
 **No** uses el paquete `gcc-aarch64-linux-gnu` ni el `aarch64-none-elf-gcc` de la
 mayoría de las distribuciones: son GCC 13/14 y la compilación falla.
+
+## Compilar en GitHub
+
+`.github/workflows/build.yml` lo compila todo en GitHub Actions en cada push:
+`make check-host`, después el núcleo para Pi 3, Pi 4 y Pi 5 en paralelo (con MIDI),
+y al final `BM-DOS-card.zip`: la tarjeta con el firmware, los ficheros de
+configuración y los tres núcleos, lista para descomprimir en una tarjeta FAT32. Los
+núcleos y el zip se descargan desde la página de la ejecución (*Artifacts*), y una
+etiqueta `v*` los publica como release.
+
+Lo lento queda en caché (toolchain, circle-stdlib, las librerías MIDI): la primera
+ejecución de cada placa tarda alrededor de una hora, las siguientes unos minutos. En
+un fork hay que activar Actions una vez desde la pestaña *Actions* del repositorio.
 
 ## Compilar desde cero
 

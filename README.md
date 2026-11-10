@@ -19,6 +19,7 @@ Pi 4 family (including the 400 and the CM4) and the Pi 5.
 - [Hardware](#hardware)
 - [Quick start](#quick-start)
 - [Build environment](#build-environment)
+- [Building on GitHub](#building-on-github)
 - [Building from scratch](#building-from-scratch)
 - [Putting it on a card](#putting-it-on-a-card)
 - [Configuration: `boot.conf`](#configuration-bootconf)
@@ -119,13 +120,16 @@ given alongside.
 | `mtools`, `dosfstools` | writing the FAT32 card |
 | `parted` | partitioning the card |
 | `curl` | downloading the toolchain |
+| `texinfo` | newlib builds its documentation with `makeinfo`, and fails without it |
+| `cmake` | building libc++, and Munt and FluidSynth for MIDI |
+| `wget` | Circle's `boot/Makefile` downloads the firmware with it |
 
 ```bash
 # Arch / CachyOS
-sudo pacman -S --needed base-devel git python mtools dosfstools parted curl
+sudo pacman -S --needed base-devel git python mtools dosfstools parted curl texinfo cmake wget
 
 # Debian / Ubuntu
-sudo apt install build-essential git python3 mtools dosfstools parted curl
+sudo apt install build-essential git python3 mtools dosfstools parted curl texinfo cmake wget
 ```
 
 About 8 GB of disk for the build trees and the toolchain.
@@ -158,6 +162,19 @@ make TOOLCHAIN_DIR=/path/with/arm-gnu-toolchain-*
 
 Do **not** use the `gcc-aarch64-linux-gnu` package or the `aarch64-none-elf-gcc`
 from most distributions: those are GCC 13/14 and the build will fail.
+
+## Building on GitHub
+
+`.github/workflows/build.yml` builds everything on GitHub Actions on every push:
+`make check-host`, then the kernel for the Pi 3, the Pi 4 and the Pi 5 in parallel
+(with MIDI), and finally `BM-DOS-card.zip` - the card with the firmware, the
+configuration files and the three kernels, ready to unzip onto a FAT32 card. The
+kernels and the zip are downloadable from the run's page (*Artifacts*), and a tag
+`v*` publishes them as a release.
+
+The slow parts are cached (toolchain, circle-stdlib, the MIDI libraries): the first
+run of each board takes about an hour, later ones a few minutes. On a fork, Actions
+has to be enabled once in the repository's *Actions* tab.
 
 ## Building from scratch
 

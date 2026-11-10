@@ -1,0 +1,199 @@
+# .github/workflows/build.yml
+#
+# BM-DOS - build the kernel for every board on GitHub, and a ready card.
+#
+#   host-checks   make check-host (no toolchain), once
+#   kernel        one job per board (Pi 3, Pi 4, Pi 5), in parallel:
+#                 toolchain -> circle-stdlib -> Munt + FluidSynth -> kernel
+#   card          the staged card from the Pi 4 job + the three kernels,
+#                 zipped: unzip onto a FAT32 card and it boots on any of them
+#
+# The slow parts are cached: the Arm toolchain, circle-stdlib (libc++ alone is
+# most of an hour) and the MIDI libraries.  The circle-stdlib cache key holds
+# the upstream revision (setup.sh clones its HEAD), setup.sh and the Circle
+# patches, so a change to any of them rebuilds it.  The first run of each board
+# takes about an hour; a run with warm caches is a few minutes.
+#
+# A tag v* also publishes a GitHub release with the card zip and the kernels.
+#
+# Shaeon (Carlos Palmero) 2026, for BM-DOS by @mmoroca.  GPL-3.0-or-later.
+
+name: build
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write    # only used to publish a release on a v* tag
+
+env:
+  TOOLCHAIN: arm-gnu-toolchain-15.2.rel1-x86_64-aarch64-none-elf
+  TOOLCHAIN_URL: https://developer.arm.com/-/media/Files/downloads/gnu/15.2.rel1/binrel/arm-gnu-toolchain-15.2.rel1-x86_64-aarch64-none-elf.tar.xz
+
+jobs:
+  host-checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch DOSBox-core at the pinned revision
+        run: make fetch
+
+      - name: make check-host
+        run: make check-host
+
+  kernel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        rasppi: [3, 4, 5]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Host packages
+        run: |
+          sudo apt-get update -qq
+          # texinfo: newlib builds its .info pages (makeinfo); cmake: libc++,
+          # Munt and FluidSynth; wget: Circle's boot/Makefile fetches the
+          # firmware with it.
+          sudo apt-get install -y -qq --no-install-recommends \
+            texinfo cmake ninja-build mtools dosfstools parted wget python3
+
+      # --- toolchain ----------------------------------------------------
+      - name: Cache the Arm toolchain
+        id: toolchain
+        uses: actions/cache@v4
+        with:
+          path: opt/${{ env.TOOLCHAIN }}
+          key: toolchain-${{ env.TOOLCHAIN }}
+
+      - name: Download the Arm toolchain
+        if: steps.toolchain.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p opt
+          curl -fsSL "$TOOLCHAIN_URL" | tar -xJ -C opt
+
+      # On PATH for every later step.  The Makefile also puts it there itself,
+      # but GNU Make 4.3 (Ubuntu's) does not pass an exported PATH to $(shell),
+      # so the toolchain check and Circle's libgcc lookup would not find it.
+      - name: Toolchain on PATH
+        run: |
+          echo "$PWD/opt/$TOOLCHAIN/bin" >> "$GITHUB_PATH"
+          "$PWD/opt/$TOOLCHAIN/bin/aarch64-none-elf-gcc" --version | head -n 1
+
+      # --- circle-stdlib ------------------------------------------------
+      - name: circle-stdlib upstream revision
+        id: stdlib
+        run: |
+          echo "rev=$(git ls-remote https://github.com/smuehlst/circle-stdlib.git HEAD | cut -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache circle-stdlib
+        id: stdlib-cache
+        uses: actions/cache@v4
+        with:
+          path: third_party/circle-stdlib
+          key: circle-stdlib-rpi${{ matrix.rasppi }}-${{ steps.stdlib.outputs.rev }}-${{ hashFiles('scripts/setup.sh', 'patches/*.patch') }}-${{ env.TOOLCHAIN }}
+
+      - name: Build circle-stdlib (Circle, newlib, libc++)
+        if: steps.stdlib-cache.outputs.cache-hit != 'true'
+        run: |
+          RASPPI=${{ matrix.rasppi }} ./scripts/setup.sh
+          # The LLVM source tree and libc++'s fetch area are only needed to
+          # build libc++, and they are 2.6 of its 4.4 GB: drop them so the
+          # cache (10 GB per repository, three boards) stays small.
+          rm -rf third_party/circle-stdlib/libs/llvm-project \
+                 third_party/circle-stdlib/build/libcxx-fetch
+
+      # --- MIDI synthesizers -------------------------------------------------
+      - name: Cache Munt and FluidSynth
+        id: midi-cache
+        uses: actions/cache@v4
+        with:
+          path: third_party/midi-rpi${{ matrix.rasppi }}
+          key: midi-rpi${{ matrix.rasppi }}-${{ steps.stdlib.outputs.rev }}-${{ hashFiles('scripts/setup.sh', 'patches/*.patch') }}-${{ hashFiles('MUNT_REV', 'FLUIDSYNTH_REV', 'patches/fluidsynth/*', 'scripts/build-midi-libs.sh', 'cmake/*') }}
+
+      - name: Build Munt and FluidSynth
+        if: steps.midi-cache.outputs.cache-hit != 'true'
+        run: ./scripts/build-midi-libs.sh
+
+      # --- kernel ------------------------------------------------------------
+      - name: Fetch DOSBox-core at the pinned revision
+        run: make fetch
+
+      - name: Build the kernel
+        run: make -j"$(nproc)" RASPPI=${{ matrix.rasppi }}
+
+      - name: Kernel image
+        id: image
+        run: |
+          case ${{ matrix.rasppi }} in
+            3) img=kernel8.img ;;
+            4) img=kernel8-rpi4.img ;;
+            5) img=kernel_2712.img ;;
+          esac
+          test -f "$img"
+          ls -l "$img"
+          echo "img=$img" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernel-rpi${{ matrix.rasppi }}
+          path: ${{ steps.image.outputs.img }}
+          if-no-files-found: error
+
+      # The card is staged once, from the Pi 4 job: it is the one that needs
+      # the armstub, and make-sd.sh builds it from the Circle tree this job
+      # has.  The other two kernels are added in the card job.
+      - name: Stage the card (firmware, config, dosbox.conf)
+        if: matrix.rasppi == 4
+        run: RASPPI=4 ./scripts/make-sd.sh --stage ./sdcard
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.rasppi == 4
+        with:
+          name: sdcard-base
+          path: sdcard
+          if-no-files-found: error
+
+  card:
+    needs: [host-checks, kernel]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dl
+
+      - name: Assemble the card
+        run: |
+          mkdir card
+          cp -r dl/sdcard-base/. card/
+          cp dl/kernel-rpi3/kernel8.img card/
+          cp dl/kernel-rpi4/kernel8-rpi4.img card/
+          cp dl/kernel-rpi5/kernel_2712.img card/
+          ls -l card
+          (cd card && zip -qr ../BM-DOS-card.zip .)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BM-DOS-card
+          path: BM-DOS-card.zip
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            BM-DOS-card.zip
+            card/kernel8.img
+            card/kernel8-rpi4.img
+            card/kernel_2712.img
