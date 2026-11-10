@@ -78,10 +78,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           # texinfo: newlib builds its .info pages (makeinfo); cmake: libc++,
-          # Munt and FluidSynth; wget: Circle's boot/Makefile fetches the
-          # firmware with it.
+          # Munt and FluidSynth; pkg-config: FluidSynth's configure step (it
+          # is pointed at empty glib stand-ins, see build-midi-libs.sh); wget:
+          # Circle's boot/Makefile fetches the firmware with it.
           sudo apt-get install -y -qq --no-install-recommends \
-            texinfo cmake ninja-build mtools dosfstools parted wget python3
+            texinfo cmake ninja-build pkg-config mtools dosfstools parted wget python3
 
       # --- toolchain ----------------------------------------------------
       - name: Cache the Arm toolchain

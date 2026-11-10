@@ -125,6 +125,26 @@ cmake --install "$BUILD/munt" >/dev/null
 # --- FluidSynth --------------------------------------------------------------
 
 echo "building libfluidsynth for Raspberry Pi $RASPPI"
+
+# FluidSynth's CMakeLists.txt still runs pkg_check_modules(glib-2.0
+# gthread-2.0 REQUIRED) although the patch removes every use of glib from the
+# library.  Rather than install the HOST's glib (wrong architecture, and its
+# include paths could leak into a cross build), pkg-config is pointed at two
+# empty stand-ins and at nothing else: PKG_CONFIG_LIBDIR replaces the system
+# search path, so no host package can be found by accident.
+PC_STUBS="$BUILD/pkgconfig-stubs"
+mkdir -p "$PC_STUBS"
+for pc in glib-2.0 gthread-2.0; do
+	cat > "$PC_STUBS/$pc.pc" <<PC
+Name: $pc
+Description: stand-in: the patched FluidSynth does not use glib
+Version: 2.80.0
+Cflags:
+Libs:
+PC
+done
+
+PKG_CONFIG_LIBDIR="$PC_STUBS" PKG_CONFIG_PATH="" \
 cmake -S "$TP/fluidsynth" -B "$BUILD/fluidsynth" \
 	-DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
 	-DCMAKE_BUILD_TYPE=Release \
