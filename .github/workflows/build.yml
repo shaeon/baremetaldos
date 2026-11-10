@@ -85,9 +85,13 @@ jobs:
             texinfo cmake ninja-build pkg-config mtools dosfstools parted wget python3
 
       # --- toolchain ----------------------------------------------------
-      - name: Cache the Arm toolchain
+      # Caches are restored and saved as separate steps, and each one is saved
+      # right after it was built: actions/cache saves only when the whole job
+      # succeeds, so a failure in a later step would throw away an hour of
+      # circle-stdlib and rebuild it on every attempt.
+      - name: Restore the Arm toolchain
         id: toolchain
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: opt/${{ env.TOOLCHAIN }}
           key: toolchain-${{ env.TOOLCHAIN }}
@@ -97,6 +101,13 @@ jobs:
         run: |
           mkdir -p opt
           curl -fsSL "$TOOLCHAIN_URL" | tar -xJ -C opt
+
+      - name: Save the Arm toolchain
+        if: steps.toolchain.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: opt/${{ env.TOOLCHAIN }}
+          key: toolchain-${{ env.TOOLCHAIN }}
 
       # On PATH for every later step.  The Makefile also puts it there itself,
       # but GNU Make 4.3 (Ubuntu's) does not pass an exported PATH to $(shell),
@@ -112,9 +123,9 @@ jobs:
         run: |
           echo "rev=$(git ls-remote https://github.com/smuehlst/circle-stdlib.git HEAD | cut -f1)" >> "$GITHUB_OUTPUT"
 
-      - name: Cache circle-stdlib
+      - name: Restore circle-stdlib
         id: stdlib-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: third_party/circle-stdlib
           key: circle-stdlib-rpi${{ matrix.rasppi }}-${{ steps.stdlib.outputs.rev }}-${{ hashFiles('scripts/setup.sh', 'patches/*.patch') }}-${{ env.TOOLCHAIN }}
@@ -129,10 +140,17 @@ jobs:
           rm -rf third_party/circle-stdlib/libs/llvm-project \
                  third_party/circle-stdlib/build/libcxx-fetch
 
+      - name: Save circle-stdlib
+        if: steps.stdlib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: third_party/circle-stdlib
+          key: ${{ steps.stdlib-cache.outputs.cache-primary-key }}
+
       # --- MIDI synthesizers -------------------------------------------------
-      - name: Cache Munt and FluidSynth
+      - name: Restore Munt and FluidSynth
         id: midi-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: third_party/midi-rpi${{ matrix.rasppi }}
           key: midi-rpi${{ matrix.rasppi }}-${{ steps.stdlib.outputs.rev }}-${{ hashFiles('scripts/setup.sh', 'patches/*.patch') }}-${{ hashFiles('MUNT_REV', 'FLUIDSYNTH_REV', 'patches/fluidsynth/*', 'scripts/build-midi-libs.sh', 'cmake/*') }}
@@ -140,6 +158,13 @@ jobs:
       - name: Build Munt and FluidSynth
         if: steps.midi-cache.outputs.cache-hit != 'true'
         run: ./scripts/build-midi-libs.sh
+
+      - name: Save Munt and FluidSynth
+        if: steps.midi-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: third_party/midi-rpi${{ matrix.rasppi }}
+          key: ${{ steps.midi-cache.outputs.cache-primary-key }}
 
       # --- kernel ------------------------------------------------------------
       - name: Fetch DOSBox-core at the pinned revision
