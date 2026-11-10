@@ -395,6 +395,12 @@ const char *BareMidiStatus (void);
 /// \brief MIDI bytes received from the MPU-401 so far, synthesizer or not.
 u64     BareMidiBytesIn (void);
 
+/// \brief Frames core 1 has rendered so far, and the loudest MIDI sample
+///\t   mixed since the previous call (reset by the call).  For the panel:
+///\t   bytes arriving with nothing rendered, or rendered at peak 0, are two
+///\t   different faults.
+void    BareMidiLevels (u64 *pRendered, unsigned *pPeak);
+
 // ---------------------------------------------------------------------------
 // Input - bare_input.cpp
 // ---------------------------------------------------------------------------

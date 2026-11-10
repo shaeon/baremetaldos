@@ -905,20 +905,34 @@ const char *BuildPanel (void)
 	// MPU-401 received.  "midi off 900/s" is a game sending MIDI with no
 	// synthesizer open; "gm 0/s" a synthesizer waiting for a game that
 	// sends nothing.
-	char Midi[24] = "";
+	char Midi[40] = "";
 	{
 		static u64 s_nLastBytes = 0;
 		const u64 nBytes = BareMidiBytesIn ();
 		const unsigned nRate = static_cast<unsigned> (nBytes - s_nLastBytes);
 		s_nLastBytes = nBytes;
 
-		if (BareMidiActive () || nBytes != 0)
+		// With a synthesizer: also the frames core 1 rendered in the last
+		// second (thousands; ~44 when it keeps up) and the loudest MIDI
+		// sample mixed into the output (0..32767).  "r0" is core 1 not
+		// rendering; "r44 p0" a synthesizer producing silence.
+		static u64 s_nLastRendered = 0;
+		u64 nRendered = 0;
+		unsigned nPeak = 0;
+		BareMidiLevels (&nRendered, &nPeak);
+		const unsigned nRenderK = static_cast<unsigned> ((nRendered - s_nLastRendered) / 1000);
+		s_nLastRendered = nRendered;
+
+		if (BareMidiActive ())
 		{
 			const char *pName = BareMidiName ();
-			snprintf (Midi, sizeof Midi, "  %s %u/s",
-				  !BareMidiActive () ? "midi off"
-				  : strcmp (pName, "fluidsynth") == 0 ? "gm" : pName,
-				  nRate);
+			snprintf (Midi, sizeof Midi, "  %s %u/s r%u p%u",
+				  strcmp (pName, "fluidsynth") == 0 ? "gm" : pName,
+				  nRate, nRenderK, nPeak);
+		}
+		else if (nBytes != 0)
+		{
+			snprintf (Midi, sizeof Midi, "  midi off %u/s", nRate);
 		}
 	}
 

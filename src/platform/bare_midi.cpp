@@ -125,6 +125,8 @@ baremidi::TMidiParser s_Parser;
 // Counters for the panel and the log.  Written by one side each.
 std::atomic<u64> s_nBytesDropped {0};		// core 0: MIDI byte ring full
 std::atomic<u64> s_nUnderruns {0};		// core 0: mixer found too few samples
+std::atomic<u64> s_nRendered {0};		// core 1: frames rendered so far
+std::atomic<unsigned> s_nPeak {0};		// core 0: loudest MIDI sample mixed
 
 unsigned s_nSampleRate = 44100;
 
@@ -177,6 +179,7 @@ void Core1Loop (void)
 		{
 			pSynth->Render (Block, BlockFrames);
 			s_Out.Write (Block, BlockFrames * 2);	// cannot overflow: Count < Target < capacity
+			s_nRendered.fetch_add (BlockFrames, std::memory_order_relaxed);
 		}
 		else
 		{
@@ -376,6 +379,13 @@ public:
 		fluid_settings_setint (m_pSettings, "synth.device-id", 0x10);
 		fluid_settings_setnum (m_pSettings, "synth.sample-rate", static_cast<double> (s_nSampleRate));
 		fluid_settings_setint (m_pSettings, "synth.threadsafe-api", 0);
+
+		// FluidSynth's default gain (0.2) leaves a full chord at about 12 %
+		// of full scale (measured on the PC with GeneralUser GS), well under
+		// the Sound Blaster it is mixed with; game music sits lower still.
+		// 0.6 brings it level with DOSBox's own output; the mix saturates,
+		// so a loud passage clips instead of wrapping.
+		fluid_settings_setnum (m_pSettings, "synth.gain", 0.6);
 #if RASPPI <= 3
 		fluid_settings_setint (m_pSettings, "synth.polyphony", 64);
 #else
@@ -647,13 +657,22 @@ void BareMidiMix (s16 *pFrames, unsigned nFrames)
 		const unsigned nWant = nFrames < 512 ? nFrames : 512;
 		const unsigned nGot = static_cast<unsigned> (s_Out.Read (Chunk, nWant * 2)) / 2;
 
+		unsigned nPeak = s_nPeak.load (std::memory_order_relaxed);
 		for (unsigned i = 0; i < nGot * 2; i++)
 		{
+			const unsigned nAbs = Chunk[i] < 0 ? -Chunk[i] : Chunk[i];
+			if (nAbs > nPeak)
+			{
+				nPeak = nAbs;
+			}
+
 			int nSum = pFrames[i] + Chunk[i];
 			if (nSum > 32767)  nSum = 32767;
 			if (nSum < -32768) nSum = -32768;
 			pFrames[i] = static_cast<s16> (nSum);
 		}
+
+		s_nPeak.store (nPeak, std::memory_order_relaxed);
 
 		if (nGot < nWant)
 		{
@@ -682,4 +701,10 @@ const char *BareMidiStatus (void)
 u64 BareMidiBytesIn (void)
 {
 	return s_nBytesIn;
+}
+
+void BareMidiLevels (u64 *pRendered, unsigned *pPeak)
+{
+	if (pRendered != nullptr) *pRendered = s_nRendered.load (std::memory_order_relaxed);
+	if (pPeak != nullptr)     *pPeak = s_nPeak.exchange (0, std::memory_order_relaxed);
 }
