@@ -923,12 +923,25 @@ const char *BuildPanel (void)
 		const unsigned nRenderK = static_cast<unsigned> ((nRendered - s_nLastRendered) / 1000);
 		s_nLastRendered = nRendered;
 
+		// And "u" when the mixer found core 1's ring short in the last second
+		// (each one is a gap in the music, heard as a click).
+		static u64 s_nLastUnder = 0;
+		u64 nUnder = 0;
+		BareMidiStats (&nUnder, nullptr);
+		const unsigned nUnderRate = static_cast<unsigned> (nUnder - s_nLastUnder);
+		s_nLastUnder = nUnder;
+
 		if (BareMidiActive ())
 		{
 			const char *pName = BareMidiName ();
-			snprintf (Midi, sizeof Midi, "  %s %u/s r%u p%u",
+			char Under[16] = "";
+			if (nUnderRate != 0)
+			{
+				snprintf (Under, sizeof Under, " u%u", nUnderRate);
+			}
+			snprintf (Midi, sizeof Midi, "  %s %u/s r%u p%u%s",
 				  strcmp (pName, "fluidsynth") == 0 ? "gm" : pName,
-				  nRate, nRenderK, nPeak);
+				  nRate, nRenderK, nPeak, Under);
 		}
 		else if (nBytes != 0)
 		{

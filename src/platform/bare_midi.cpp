@@ -380,12 +380,13 @@ public:
 		fluid_settings_setnum (m_pSettings, "synth.sample-rate", static_cast<double> (s_nSampleRate));
 		fluid_settings_setint (m_pSettings, "synth.threadsafe-api", 0);
 
-		// FluidSynth's default gain (0.2) leaves a full chord at about 12 %
-		// of full scale (measured on the PC with GeneralUser GS), well under
-		// the Sound Blaster it is mixed with; game music sits lower still.
-		// 0.6 brings it level with DOSBox's own output; the mix saturates,
-		// so a loud passage clips instead of wrapping.
-		fluid_settings_setnum (m_pSettings, "synth.gain", 0.6);
+		// Gain: FluidSynth's default 0.2 left a full piano chord at about
+		// 12 % of full scale (measured on the PC with GeneralUser GS); 0.6,
+		// tried on the board, put the music on top of a Sound Blaster / GUS
+		// mix that is already near full scale, and the sum clipped - heard
+		// as a harsh, "saturated" sound.  0.35 keeps the music audible and
+		// leaves headroom for the rest of DOSBox's output.
+		fluid_settings_setnum (m_pSettings, "synth.gain", 0.35);
 #if RASPPI <= 3
 		fluid_settings_setint (m_pSettings, "synth.polyphony", 64);
 #else
