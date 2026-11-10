@@ -53,6 +53,9 @@ The kernel image produced by this build statically links:
   * libc++            - Apache-2.0 with LLVM exceptions
   * DOSBox-core       - GPL-2.0 or later  (C) The DOSBox Team,
                         (C) Nikos Chantziaras
+  * Munt (mt32emu)    - LGPL-2.1 or later (C) Dean Beeler, Jerome Fisher,
+                        Sergey V. Mikayev
+  * FluidSynth        - LGPL-2.1 or later (C) Peter Hanappe and others
 
 Because Circle (GPL-3.0) and DOSBox-core (GPL-2.0-or-later) are combined into a
 single binary, the resulting image as a whole is distributed under the terms of
@@ -71,7 +74,12 @@ Acknowledgements, and where the idea came from:
   * And by the challenge proposed by @shaeon (https://github.com/shaeon),
     author of ZXMetalCircle (https://github.com/shaeon/ZXMetalCircle).
 
-No code is copied from either project.  What they gave this one is the idea that
+No code is copied from either project.
+
+  * The MIDI synthesizers follow mt32-pi by Dale Whinham
+    (https://github.com/dwhinham/mt32-pi, GPL-3.0): the pinned Munt and
+    FluidSynth revisions, patches/fluidsynth/fluidsynth-2.3.1-circle.patch
+    (taken verbatim) and the CMake toolchain file come from that project.  What they gave this one is the idea that
 a Raspberry Pi can run a whole computer's worth of software with no operating
 system underneath, and the reason to try it with DOSBox.
 
