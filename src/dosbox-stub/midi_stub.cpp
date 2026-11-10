@@ -68,6 +68,7 @@
 
 #include <circle/logger.h>
 
+#include <cstdio>
 #include <string>
 
 DB_Midi midi;
@@ -107,25 +108,29 @@ bool MIDI_Available (void)
 
 void MIDI_Init (Section *pSection)
 {
-	// LOG_MSG is not available here (see the history of this file: it pulls
-	// in the SDL frontend), so the result goes to Circle's logger.
 	auto *pProps = static_cast<Section_prop *> (pSection);
 	const char *pDevice = pProps->Get_string ("mididevice");
 	const char *pConfig = pProps->Get_string ("midiconfig");
 
-	if (BareMidiOpen (pDevice, pConfig))
+	midi.available = BareMidiOpen (pDevice, pConfig) != FALSE;
+
+	// On the boot screen, and only when something changed.  dosbox-core runs
+	// this init again every time one of its core options touches the [midi]
+	// section (a dozen times while it starts), and the sequence of values is
+	// exactly what has to be seen if MIDI does not work: a line saying
+	// mididevice=fluidsynth followed by one saying mididevice=none would mean
+	// the core rewrote dosbox.conf's value after reading it.
+	static std::string s_LastLine;
+	char Line[160];
+	snprintf (Line, sizeof Line, "midi: mididevice=%s midiconfig=%s -> %s",
+		  pDevice != nullptr ? pDevice : "?",
+		  pConfig != nullptr && *pConfig != '\0' ? pConfig : "(none)",
+		  midi.available ? "ON" : "off");
+	if (s_LastLine != Line)
 	{
-		midi.available = true;
-		CLogger::Get ()->Write ("midi", LogNotice, "MIDI device: %s", BareMidiName ());
-	}
-	else
-	{
-		midi.available = false;
-		if (pDevice != nullptr && pDevice[0] != '\0' && std::string (pDevice) != "none"
-		    && std::string (pDevice) != "default")
-		{
-			CLogger::Get ()->Write ("midi", LogWarning,
-						"mididevice=%s requested but not available", pDevice);
-		}
+		s_LastLine = Line;
+		CLogger::Get ()->Write ("midi", LogNotice, "%s", Line);
+		BareVideoStatusPrint (Line);
+		BareVideoStatusPrint (BareMidiStatus ());
 	}
 }

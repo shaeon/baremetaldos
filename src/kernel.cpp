@@ -900,6 +900,28 @@ const char *BuildPanel (void)
 		}
 	}
 
+	// MIDI, once there is something to say: the synthesizer ("gm" for
+	// FluidSynth, "mt32") or "midi off", and the bytes per second the
+	// MPU-401 received.  "midi off 900/s" is a game sending MIDI with no
+	// synthesizer open; "gm 0/s" a synthesizer waiting for a game that
+	// sends nothing.
+	char Midi[24] = "";
+	{
+		static u64 s_nLastBytes = 0;
+		const u64 nBytes = BareMidiBytesIn ();
+		const unsigned nRate = static_cast<unsigned> (nBytes - s_nLastBytes);
+		s_nLastBytes = nBytes;
+
+		if (BareMidiActive () || nBytes != 0)
+		{
+			const char *pName = BareMidiName ();
+			snprintf (Midi, sizeof Midi, "  %s %u/s",
+				  !BareMidiActive () ? "midi off"
+				  : strcmp (pName, "fluidsynth") == 0 ? "gm" : pName,
+				  nRate);
+		}
+	}
+
 	if (bHasAudio)
 	{
 		// ASCII only, and that is not cosmetic: Circle's built-in font has no
@@ -947,11 +969,11 @@ const char *BuildPanel (void)
 		// and did not fit 1024 - the kind of thing that only shows up on the
 		// board, hence the arithmetic written down.
 		snprintf (Panel, sizeof Panel,
-			  "%s  %s  %u MHz  %uC%s  %s%s  fr %uus  %s %u/%u  drop %u",
+			  "%s  %s  %u MHz  %uC%s  %s%s  fr %uus  %s %u/%u  drop %u%s",
 			  BareSysInfoBoardName (), Cores,
 			  nArmMHz, nCelsius, pThrottle, pGovernor, Pace,
 			  s_PaceCallMicros,
-			  BareAudioDeviceName (), nFree, nSize, s_PaceDropped);
+			  BareAudioDeviceName (), nFree, nSize, s_PaceDropped, Midi);
 	}
 	else
 	{

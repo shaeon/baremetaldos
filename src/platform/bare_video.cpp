@@ -152,7 +152,7 @@ struct TLineSlot
 	// the present path repaints the slots once per frame: the panel is one
 	// line that changes every second, but the *repaint* has to happen every
 	// frame or a game that redraws its screen would wipe it.
-	char Text[128];
+	char Text[192];
 };
 
 constexpr unsigned MaxSlots = 2;
@@ -1969,10 +1969,16 @@ void BareVideoLine (unsigned nSlot, const char *pText)
 	// narrowing (a line of text is never 4 GB, but the compiler cannot know
 	// that and -Wconversion is right to say so), and a text longer than the
 	// screen would make nX unsigned-wrap and draw off the left edge.
+	// As many characters as the mode is wide (the old bound compared a
+	// character count with a pixel width).  The panel grew a video and a
+	// MIDI field and runs past 128 characters on a wide mode.
 	size_t nChars = strlen (pText);
-	if (nChars > s_nModeWidth)
+	const unsigned nCharW = s_Font.GetCharWidth () != 0 ? s_Font.GetCharWidth () : 8;
+	const size_t nFit = s_nModeWidth > 2 * PanelMargin
+			    ? (s_nModeWidth - 2 * PanelMargin) / nCharW : 0;
+	if (nChars > nFit)
 	{
-		nChars = s_nModeWidth;
+		nChars = nFit;
 	}
 
 	// Left-aligned and *fixed*, which is two changes in one.  It used to be

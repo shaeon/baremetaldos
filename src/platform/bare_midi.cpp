@@ -59,6 +59,25 @@
 
 static const char FromMidi[] = "midi";
 
+#include <cstdarg>
+
+// The last thing the MIDI side had to say, for the screen.  CLogger writes to
+// Circle's console, which is NOT the frame buffer this port shows, so a MIDI
+// failure used to be invisible: a missing SoundFont and a game sending
+// nothing looked the same - silence.  Every message goes to the log AND here,
+// and midi_stub.cpp puts this line on the boot screen.  Core 0 only.
+static char s_MidiStatus[112] = "midi: no device opened";
+
+static void MidiNote (TLogSeverity Severity, const char *pFormat, ...)
+{
+	va_list Args;
+	va_start (Args, pFormat);
+	vsnprintf (s_MidiStatus, sizeof s_MidiStatus, pFormat, Args);
+	va_end (Args);
+
+	CLogger::Get ()->Write (FromMidi, Severity, "%s", s_MidiStatus);
+}
+
 namespace {
 
 // --- sizes ------------------------------------------------------------------
@@ -251,15 +270,14 @@ public:
 
 		if (m_pControl == nullptr || m_pPCM == nullptr)
 		{
-			CLogger::Get ()->Write (FromMidi, LogWarning,
-						"mt32: no usable ROM pair in %s", SystemDir);
+			MidiNote (LogWarning, "mt32: no MT32_CONTROL.ROM + MT32_PCM.ROM (or CM32L_*) usable in %s", SystemDir);
 			return false;
 		}
 
 		if (!m_Synth.open (*m_pControl, *m_pPCM, MT32Emu::DEFAULT_MAX_PARTIALS,
 				   MT32Emu::AnalogOutputMode_COARSE))
 		{
-			CLogger::Get ()->Write (FromMidi, LogWarning, "mt32: synth did not open");
+			MidiNote (LogWarning, "mt32: synth did not open");
 			return false;
 		}
 
@@ -272,7 +290,7 @@ public:
 #endif
 		m_pConverter = new MT32Emu::SampleRateConverter (m_Synth, s_nSampleRate, Quality);
 
-		CLogger::Get ()->Write (FromMidi, LogNotice, "mt32: %s ready",
+		MidiNote (LogNotice, "mt32: %s ready",
 					m_pControl->getROMInfo ()->shortName);
 		return true;
 	}
@@ -308,8 +326,7 @@ private:
 			&& m_pPCM->getROMInfo ()->type == MT32Emu::ROMInfo::PCM;
 		if (!bOk)
 		{
-			CLogger::Get ()->Write (FromMidi, LogWarning,
-						"mt32: %s / %s are not a known ROM pair", pControlName, pPCMName);
+			MidiNote (LogWarning, "mt32: %s / %s are not a known ROM pair", pControlName, pPCMName);
 			if (m_pControl != nullptr) MT32Emu::ROMImage::freeROMImage (m_pControl);
 			if (m_pPCM != nullptr)     MT32Emu::ROMImage::freeROMImage (m_pPCM);
 			m_pControl = m_pPCM = nullptr;
@@ -373,11 +390,11 @@ public:
 
 		if (fluid_synth_sfload (m_pSynth, Path.c_str (), 1) == FLUID_FAILED)
 		{
-			CLogger::Get ()->Write (FromMidi, LogWarning, "fluidsynth: cannot load %s", Path.c_str ());
+			MidiNote (LogWarning, "fluidsynth: cannot load %s", Path.c_str ());
 			return false;
 		}
 
-		CLogger::Get ()->Write (FromMidi, LogNotice, "fluidsynth: %s ready", Path.c_str ());
+		MidiNote (LogNotice, "fluidsynth: %s ready", Path.c_str ());
 		return true;
 	}
 
@@ -492,7 +509,7 @@ boolean BareMidiInit (unsigned nSampleRate)
 
 	if (!BareCoresRun (1, Core1Loop))
 	{
-		CLogger::Get ()->Write (FromMidi, LogWarning, "core 1 not available: MIDI off");
+		MidiNote (LogWarning, "core 1 not available: MIDI off");
 		return FALSE;
 	}
 
@@ -521,8 +538,17 @@ boolean BareMidiOpen (const char *pDevice, const char *pConfig)
 	BareMidiClose ();
 
 #if BARE_MIDI
-	if (!s_bCore1Running.load (std::memory_order_acquire) || pDevice == nullptr)
+	if (pDevice == nullptr || (std::strcmp (pDevice, "mt32") != 0
+				   && std::strcmp (pDevice, "fluidsynth") != 0))
 	{
+		MidiNote (LogNotice, "midi: mididevice=%s - no synthesizer (mt32 | fluidsynth)",
+			  pDevice != nullptr ? pDevice : "?");
+		return FALSE;
+	}
+
+	if (!s_bCore1Running.load (std::memory_order_acquire))
+	{
+		MidiNote (LogWarning, "midi: %s asked for, but core 1 is not running", pDevice);
 		return FALSE;
 	}
 
@@ -556,6 +582,8 @@ boolean BareMidiOpen (const char *pDevice, const char *pConfig)
 	return TRUE;
 #else
 	(void) pConfig;
+	MidiNote (LogWarning, "midi: %s asked for, but this kernel was built without MIDI",
+		  pDevice != nullptr ? pDevice : "?");
 	return FALSE;
 #endif
 }
@@ -585,8 +613,16 @@ const char *BareMidiName (void)
 	return pSynth != nullptr ? pSynth->Name () : "none";
 }
 
+// Every byte the MPU-401 sends, counted whether or not a synthesizer takes
+// it: the panel shows the rate, which separates "the game sends nothing" (a
+// setup problem in the game, or the MPU not seen) from "bytes arrive and
+// nothing sounds" (a problem on this side).  Core 0 only.
+static u64 s_nBytesIn = 0;
+
 void BareMidiOutByte (u8 nByte)
 {
+	s_nBytesIn++;
+
 	if (s_pSynth.load (std::memory_order_relaxed) == nullptr)
 	{
 		return;
@@ -636,4 +672,14 @@ void BareMidiStats (u64 *pUnderruns, u64 *pBytesDropped)
 {
 	if (pUnderruns != nullptr)    *pUnderruns = s_nUnderruns.load (std::memory_order_relaxed);
 	if (pBytesDropped != nullptr) *pBytesDropped = s_nBytesDropped.load (std::memory_order_relaxed);
+}
+
+const char *BareMidiStatus (void)
+{
+	return s_MidiStatus;
+}
+
+u64 BareMidiBytesIn (void)
+{
+	return s_nBytesIn;
 }

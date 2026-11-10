@@ -388,6 +388,13 @@ void    BareMidiMix (s16 *pFrames, unsigned nFrames);
 /// \brief Times the mixer found core 1 behind, and MIDI bytes dropped.
 void    BareMidiStats (u64 *pUnderruns, u64 *pBytesDropped);
 
+/// \brief The last thing the MIDI side reported (device opened, or why not),
+///\t   for the screen: Circle's log is not on the port's frame buffer.
+const char *BareMidiStatus (void);
+
+/// \brief MIDI bytes received from the MPU-401 so far, synthesizer or not.
+u64     BareMidiBytesIn (void);
+
 // ---------------------------------------------------------------------------
 // Input - bare_input.cpp
 // ---------------------------------------------------------------------------
