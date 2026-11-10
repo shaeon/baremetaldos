@@ -905,6 +905,14 @@ const char *BuildPanel (void)
 	// MPU-401 received.  "midi off 900/s" is a game sending MIDI with no
 	// synthesizer open; "gm 0/s" a synthesizer waiting for a game that
 	// sends nothing.
+	// Audio gaps in the last second: the device played silence because the
+	// emulator was behind.  Each is a click; with the DC blocker in place
+	// they no longer turn a held level into a buzz.
+	static u64 s_nLastGaps = 0;
+	const u64 nGaps = BareAudioGaps ();
+	const unsigned nGapRate = static_cast<unsigned> (nGaps - s_nLastGaps);
+	s_nLastGaps = nGaps;
+
 	char Midi[40] = "";
 	{
 		static u64 s_nLastBytes = 0;
@@ -996,11 +1004,11 @@ const char *BuildPanel (void)
 		// and did not fit 1024 - the kind of thing that only shows up on the
 		// board, hence the arithmetic written down.
 		snprintf (Panel, sizeof Panel,
-			  "%s  %s  %u MHz  %uC%s  %s%s  fr %uus  %s %u/%u  drop %u%s",
+			  "%s  %s  %u MHz  %uC%s  %s%s  fr %uus  %s %u/%u  drop %u gap %u%s",
 			  BareSysInfoBoardName (), Cores,
 			  nArmMHz, nCelsius, pThrottle, pGovernor, Pace,
 			  s_PaceCallMicros,
-			  BareAudioDeviceName (), nFree, nSize, s_PaceDropped, Midi);
+			  BareAudioDeviceName (), nFree, nSize, s_PaceDropped, nGapRate, Midi);
 	}
 	else
 	{

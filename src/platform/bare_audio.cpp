@@ -35,6 +35,7 @@
 // (at your option) any later version.
 //
 #include "bare_env.h"
+#include "audio_dcblock.h"
 
 #include <circle/interrupt.h>
 #include <circle/logger.h>
@@ -64,6 +65,8 @@ const char *s_pDeviceName = "none";
 u64 s_nQueuedFrames = 0;
 u64 s_nDroppedFrames = 0;
 u64 s_nLastDrainMicros = 0;
+u64 s_nGaps = 0;			// writes that found the device queue empty
+unsigned s_nSampleRate = 44100;	// set by BareAudioInit
 
 // How much audio we let Circle queue ahead, in milliseconds.  Too small and
 // a long emulated frame underruns (clicks); too large and the sound lags the
@@ -119,6 +122,7 @@ void TryDevice (CSoundBaseDevice *pDevice, const char *pName)
 boolean BareAudioInit (unsigned nSampleRate, CInterruptSystem *pInterrupt)
 {
 	s_pSound = nullptr;
+	s_nSampleRate = nSampleRate;
 
 	// Device priority, and it is a decision rather than a default: HDMI first
 	// (it is what the board is plugged into nine times out of ten), then the
@@ -203,58 +207,77 @@ void BareAudioQueue (const s16 *pFrames, unsigned nFrames)
 	// are in the same unit as the two numbers shown next to them.
 	constexpr unsigned WriteFrameBytes = 2 * sizeof (s16);	// 16-bit stereo in
 
-	// MIDI from core 1 is mixed in here, into a copy: the batch belongs to
-	// DOSBox.  Batches are one emulated frame of audio (a few hundred frames),
-	// so the copy is small; anything larger than the buffer goes out without
-	// MIDI for the excess rather than growing a static buffer.
-	static s16 s_Mixed[4096 * 2];
-	if (BareMidiActive () && nFrames <= 4096)
+	// A gap: the device's queue ran dry since the previous write, so it played
+	// silence for a while.  (GetQueueFramesAvail() is the number of frames IN
+	// the queue - see the correction noted below.)  That is the emulator
+	// behind real time, and each gap is heard as a click, or, with a held
+	// level in the mix, as a buzz at the frame rate (audio_dcblock.h).
+	if (s_pSound->GetQueueFramesAvail () < 16)
 	{
-		memcpy (s_Mixed, pFrames, nFrames * WriteFrameBytes);
-		BareMidiMix (s_Mixed, nFrames);
-		pFrames = s_Mixed;
+		s_nGaps++;
 	}
 
-	size_t nBytes = static_cast<size_t> (nFrames) * WriteFrameBytes;
-	auto *pData = reinterpret_cast<const u8 *> (pFrames);
+	// The batch belongs to DOSBox, so everything below works on a copy, in
+	// chunks of the copy's size: MIDI from core 1 is added, then the DC
+	// blocker - the AC coupling of a real sound card's line output, which is
+	// what keeps a PC speaker left on, or a DAC parked at an extreme, from
+	// reaching the HDMI as a constant level.
+	static s16 s_Mixed[2048 * 2];
+	static bareaudio::CDCBlocker s_DCBlock (10.0f, static_cast<float> (s_nSampleRate));
 
-	// No guessing about free space: Write() is the authority.  It takes the
-	// device's spin lock, converts format if it has to, and copies as many
-	// whole frames as fit, returning the number of *write-format* bytes it
-	// accepted.  Whatever it does not take is dropped and counted.
-	//
-	// This is a correction of a real bug.  The previous version asked
-	// GetQueueFramesAvail() how much room was left, and that function returns
-	// the frames *currently in* the queue - the opposite.  So the queue always
-	// looked full, every frame was discarded, Write() was never called with a
-	// single sample, and the panel showed "drop" climbing for ever while
-	// nothing came out of either the HDMI or the jack.  There was no sound
-	// because there was no data, not because of the device.
-	const int nResult = s_pSound->Write (pData, nBytes);
-	if (nResult > 0)
+	while (nFrames != 0)
 	{
-		nBytes -= static_cast<size_t> (nResult);
-		s_nQueuedFrames += static_cast<u64> (nResult) / WriteFrameBytes;
-		s_nLastDrainMicros = BareMicros ();
-	}
+		const unsigned nChunk = nFrames < 2048 ? nFrames : 2048;
+		memcpy (s_Mixed, pFrames, nChunk * WriteFrameBytes);
+		if (BareMidiActive ())
+		{
+			BareMidiMix (s_Mixed, nChunk);
+		}
+		s_DCBlock.Process (s_Mixed, nChunk);
 
-	if (nBytes != 0)
-	{
-		// Counted in *samples this call could not hand over*, not in frames.
+		size_t nBytes = static_cast<size_t> (nChunk) * WriteFrameBytes;
+
+		// No guessing about free space: Write() is the authority.  It takes the
+		// device's spin lock, converts format if it has to, and copies as many
+		// whole frames as fit, returning the number of *write-format* bytes it
+		// accepted.  Whatever it does not take is dropped and counted.
 		//
-		// .58: the number in the panel was 2 285 317 after a few minutes of a
-		// pinball table - more drops than audio frames that exist in that time
-		// - because the old code divided the refused bytes by the size of one
-		// 16-bit stereo frame (4) and then the panel called the result "drop".
-		// Two errors stacked: the unit was frames-not-samples, and a
-		// half-filled queue produced a drop figure that looked like failure
-		// when it was the normal steady state (see below).
-		//
-		// What it is now: one unit per *sample that was discarded*.  Small
-		// fractions during normal operation, which is the truth: a queue that
-		// runs near full discards a few samples per call, and the sound is
-		// fine.
-		s_nDroppedFrames += static_cast<u64> (nBytes) / sizeof (s16);
+		// This is a correction of a real bug.  The previous version asked
+		// GetQueueFramesAvail() how much room was left, and that function returns
+		// the frames *currently in* the queue - the opposite.  So the queue always
+		// looked full, every frame was discarded, Write() was never called with a
+		// single sample, and the panel showed "drop" climbing for ever while
+		// nothing came out of either the HDMI or the jack.  There was no sound
+		// because there was no data, not because of the device.
+		const int nResult = s_pSound->Write (s_Mixed, nBytes);
+		if (nResult > 0)
+		{
+			nBytes -= static_cast<size_t> (nResult);
+			s_nQueuedFrames += static_cast<u64> (nResult) / WriteFrameBytes;
+			s_nLastDrainMicros = BareMicros ();
+		}
+
+		if (nBytes != 0)
+		{
+			// Counted in *samples this call could not hand over*, not in frames.
+			//
+			// .58: the number in the panel was 2 285 317 after a few minutes of a
+			// pinball table - more drops than audio frames that exist in that time
+			// - because the old code divided the refused bytes by the size of one
+			// 16-bit stereo frame (4) and then the panel called the result "drop".
+			// Two errors stacked: the unit was frames-not-samples, and a
+			// half-filled queue produced a drop figure that looked like failure
+			// when it was the normal steady state (see below).
+			//
+			// What it is now: one unit per *sample that was discarded*.  Small
+			// fractions during normal operation, which is the truth: a queue that
+			// runs near full discards a few samples per call, and the sound is
+			// fine.
+			s_nDroppedFrames += static_cast<u64> (nBytes) / sizeof (s16);
+		}
+
+		pFrames += nChunk * 2;
+		nFrames -= nChunk;
 	}
 
 	// And a note on why it is never zero, which is the question worth
@@ -330,4 +353,9 @@ void BareAudioStats (u64 *pQueuedFrames, u64 *pDroppedFrames, u64 *pMicrosSinceW
 		*pMicrosSinceWrite = s_nLastDrainMicros == 0
 			? 0 : BareMicros () - s_nLastDrainMicros;
 	}
+}
+
+u64 BareAudioGaps (void)
+{
+	return s_nGaps;
 }

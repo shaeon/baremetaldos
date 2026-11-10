@@ -300,6 +300,10 @@ void    BareAudioStats (u64 *pQueuedFrames, u64 *pDroppedFrames,
 ///\t   can be judged.  See BareAudioQueue for why it is never zero.
 u64     BareAudioDroppedSamples (void);
 
+/// \brief Writes that found the device's queue empty: the device had been
+///\t   playing silence, i.e. the emulator was behind real time.
+u64     BareAudioGaps (void);
+
 // ---------------------------------------------------------------------------
 // Video presentation on core 2 - bare_video.cpp
 // ---------------------------------------------------------------------------
