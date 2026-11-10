@@ -418,6 +418,20 @@ boolean CKernel::Initialize (void)
 	}
 
 	m_bDisplayOwned = TRUE;
+
+	// From here on Circle's logger must not draw on its console.  The console
+	// (CScreenDevice, cmdline.txt logdev=tty1) keeps the frame buffer it was
+	// given at start-up, and the firmware hands that same memory out again
+	// as part of the two-page buffer just allocated: every log line - the
+	// "00:03:14.04 dosbox: pace: ..." ones, once a second while the pacer
+	// complains - was drawn INTO page 1.  Invisible while core 0 shows page 0
+	// only; with the core 2 presenter flipping pages it was text in the left
+	// margin and a picture that looked broken every other frame.  The log
+	// goes to the serial port instead, where it has always been readable,
+	// and everything this port wants on screen goes through Report() and the
+	// status lines, which draw into the port's own pages.
+	mLogger.SetNewTarget (&mSerial);
+
 	m_nStatusLine = 0;
 	BareVideoStatusReset ();
 	Report ("BM-DOS %s - DOSBox on baremetal Raspberry Pi", DOSBOX_SNAPSHOT);

@@ -20,6 +20,7 @@
 #include <circle/types.h>
 #include <circle/bcmframebuffer.h>
 #include <circle/logger.h>
+#include <circle/devicenameservice.h>
 #include <circle/sched/scheduler.h>
 #include <cstring>
 static const char *const KernelName = "dosbox";
@@ -66,8 +67,16 @@ private:
 	unsigned m_nHeight;
 };
 
+// The serial port and the logger are members of the real CStdlibAppScreen too:
+// once the port owns the display, CKernel::Initialize() points the logger at
+// the serial port so that Circle's console stops drawing into memory the
+// firmware has handed to the port's second page.
+class CSerialDevice : public CDevice {};
+
 class CStdlibAppStdio : public CStdlibApp {
 public:
 	CStdlibAppStdio (const char *pName) : CStdlibApp (pName), mScreen (0, 0) {}
 	CScreenDevice mScreen;
+	CSerialDevice mSerial;
+	CLogger       mLogger;
 };

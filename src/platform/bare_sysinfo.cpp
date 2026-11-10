@@ -1108,13 +1108,21 @@ void BareSysInfoServiceTick (void)
 	}
 
 	const unsigned nPending = s_nClockRequestHz.exchange (0, std::memory_order_acq_rel);
+	const u64 nNow = BareMicros ();
+
 	if (nPending != 0)
 	{
 		(void) MailboxSetArmClock (nPending);
-		s_nServiceLastReadMicros = 0;	// read the result back now
+
+		// Read the result back 20 ms from now, not at once: the mailbox
+		// reports the OLD rate for a while after a change (see the 20 ms in
+		// BareSysInfoSetPerformance), and a read right after the change
+		// published that old rate for a whole RefreshMicros - the panel
+		// said 600 MHz for two seconds after the clock had gone up.
+		s_nServiceLastReadMicros = nNow > RefreshMicros ? nNow - RefreshMicros + 20000 : 1;
+		return;
 	}
 
-	const u64 nNow = BareMicros ();
 	if (s_nServiceLastReadMicros != 0 && nNow - s_nServiceLastReadMicros < RefreshMicros)
 	{
 		return;

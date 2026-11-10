@@ -71,6 +71,7 @@ unsigned s_nPresentedSinceStart = 0;
 
 u32 *s_pRowBuffer = nullptr;
 u32 *s_pRowBuffer2 = nullptr;		// second row, for vertical interpolation
+u32 *s_pRowBuffer3 = nullptr;		// the mixed row, before it goes to the frame buffer
 unsigned s_nRowBufferPixels = 0;
 
 CCharGenerator s_Font;
@@ -462,19 +463,24 @@ void ComputeDestination (unsigned nSrcWidth, unsigned nSrcHeight)
 	{
 		delete[] s_pRowBuffer;
 		delete[] s_pRowBuffer2;
+		delete[] s_pRowBuffer3;
 		s_pRowBuffer = new u32[s_nDstWidth];
 		s_pRowBuffer2 = new u32[s_nDstWidth];
-		s_nRowBufferPixels = (s_pRowBuffer != nullptr && s_pRowBuffer2 != nullptr)
+		s_pRowBuffer3 = new u32[s_nDstWidth];
+		s_nRowBufferPixels = (s_pRowBuffer != nullptr && s_pRowBuffer2 != nullptr
+				      && s_pRowBuffer3 != nullptr)
 				   ? s_nDstWidth : 0;
 
-		if (s_pRowBuffer == nullptr || s_pRowBuffer2 == nullptr)
+		if (s_nRowBufferPixels == 0)
 		{
-			// One of the two failed: drop both, so the scaler takes the
-			// replicate path instead of dereferencing half a pair.
+			// One of the three failed: drop them all, so the scaler takes
+			// the replicate path instead of dereferencing a partial set.
 			delete[] s_pRowBuffer;
 			delete[] s_pRowBuffer2;
+			delete[] s_pRowBuffer3;
 			s_pRowBuffer = nullptr;
 			s_pRowBuffer2 = nullptr;
+			s_pRowBuffer3 = nullptr;
 		}
 	}
 }
@@ -826,6 +832,8 @@ void BareVideoDeinit (void)
 
 	delete[] s_pRowBuffer2;
 	s_pRowBuffer2 = nullptr;
+	delete[] s_pRowBuffer3;
+	s_pRowBuffer3 = nullptr;
 	s_nRowBufferPixels = 0;
 
 	delete s_pFrameBuffer;
@@ -1184,12 +1192,20 @@ static void PresentVisibleTo (u32 *pDst, const u32 *pPixels, unsigned nWidth,
 					nRowB = nY1;
 				}
 
-				u32 *pOut = pDst + (s_nDstY + nY) * nDstPitch + s_nDstX;
+				// Mixed in RAM, then copied: the frame buffer is DEVICE
+				// memory (Circle maps GPU memory as such - no cache, no
+				// write combining), so a 32-bit store per pixel straight
+				// into it is one slow bus transaction each.  memcpy moves
+				// the row in wide stores.  This was the expensive path:
+				// a fractional vertical scale mixes most rows.
+				u32 *pMix = s_pRowBuffer3;
 				for (unsigned nX = 0; nX < s_nDstWidth; nX++)
 				{
-					pOut[nX] = MixPixel (s_pRowBuffer[nX],
+					pMix[nX] = MixPixel (s_pRowBuffer[nX],
 							     s_pRowBuffer2[nX], nMix);
 				}
+				memcpy (pDst + (s_nDstY + nY) * nDstPitch + s_nDstX,
+					pMix, s_nDstWidth * sizeof (u32));
 			}
 		}
 	}
