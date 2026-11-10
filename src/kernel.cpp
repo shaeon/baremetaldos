@@ -450,6 +450,12 @@ boolean CKernel::Initialize (void)
 
 	Report ("audio: ok");
 
+	// --- secondary cores --------------------------------------------------
+	// Started once, parked in WFE until something gives them a job
+	// (bare_cores.cpp).  Not having them is not a failed boot: MIDI and the
+	// core 2 presenter are then off and everything runs on core 0 as before.
+	Report ("cores: %s", BareCoresInit () ? "secondary cores parked" : "core 0 only");
+
 	// --- MIDI synthesizers on core 1 ---------------------------------------
 	// Before the core: MIDI_Init() runs inside DOSBox's start-up and needs core
 	// 1 already waiting.  A build without the MIDI libraries, or a core that

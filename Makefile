@@ -594,6 +594,7 @@ APP_SRCS := \
 	src/platform/bare_fs.cpp \
 	src/platform/bare_sysinfo.cpp \
 	src/platform/bare_dynarec.cpp \
+	src/platform/bare_cores.cpp \
 	src/platform/bare_midi.cpp \
 	src/dosbox-stub/midi_stub.cpp \
 	src/dosbox-stub/posix_stubs.cpp

@@ -50,7 +50,7 @@ fi
 # so the one file that talks to Circle's USB stack - and that .60 rewrote to
 # add gamepads - was compiled by nothing except the cross build
 # machine.  Two of the four faults that round fixed were in this file.
-FILES="bare_sysinfo bare_audio bare_video bare_time bare_fs bare_thread bare_dynarec bare_input bare_midi"
+FILES="bare_sysinfo bare_audio bare_video bare_time bare_fs bare_thread bare_dynarec bare_input bare_cores bare_midi"
 OBJ=/tmp/check-symbols.$$
 mkdir -p $OBJ
 

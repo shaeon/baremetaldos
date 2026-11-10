@@ -371,6 +371,10 @@ cat > circle/synchronize.h <<'EOF'
 #include <circle/types.h>
 void CleanAndInvalidateDataCacheRange (u32 nAddress, u32 nLength);
 void SyncDataAndInstructionCache (void);
+// bare_cores.cpp parks cores with WFE and wakes them with DSB + SEV.
+#define DataSyncBarrier()	((void) 0)
+#define WaitForEvent()		((void) 0)
+#define SendEvent()		((void) 0)
 EOF
 
 cat > circle/terminal.h <<'EOF'

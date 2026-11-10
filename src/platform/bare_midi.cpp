@@ -42,8 +42,6 @@
 #include "midi_queue.h"
 
 #include <circle/logger.h>
-#include <circle/memory.h>
-#include <circle/multicore.h>
 #include <circle/timer.h>
 
 #include <atomic>
@@ -122,6 +120,8 @@ struct TSynthSink
 
 void Core1Loop (void)
 {
+	s_bCore1Running.store (true, std::memory_order_release);
+
 	s16 Block[BlockFrames * 2];
 	u8 Bytes[256];
 
@@ -132,7 +132,13 @@ void Core1Loop (void)
 		if (pSynth == nullptr || s_pSynth.load () != pSynth)
 		{
 			s_pInUse.store (nullptr);
-			CTimer::SimpleMsDelay (pSynth == nullptr ? 5 : 0);
+			// No synthesizer: sleep in WFE until BareMidiOpen() publishes one
+			// (it calls BareCoresWake).  A busy delay here would keep core 1
+			// at full clock for the whole session of a user without MIDI.
+			if (pSynth == nullptr)
+			{
+				BareCoresWait ();
+			}
 			continue;
 		}
 
@@ -165,24 +171,6 @@ void Core1Loop (void)
 	}
 }
 
-class CBareCores : public CMultiCoreSupport
-{
-public:
-	CBareCores (void) : CMultiCoreSupport (CMemorySystem::Get ()) {}
-
-	void Run (unsigned nCore) override
-	{
-		if (nCore == 1)
-		{
-			s_bCore1Running.store (true, std::memory_order_release);
-			Core1Loop ();			// never returns
-		}
-		// Cores 2 and 3: nothing to do yet.  Returning halts them, which is
-		// what they did before this file existed.
-	}
-};
-
-CBareCores *s_pCores = nullptr;
 
 // Wait until core 1 no longer uses pSynth.  Not bounded on purpose: deleting
 // a synthesizer that core 1 is rendering is a crash, and core 1 drops the
@@ -497,25 +485,15 @@ boolean BareMidiInit (unsigned nSampleRate)
 	s_nSampleRate = nSampleRate;
 
 #if BARE_MIDI
-	if (s_pCores != nullptr)
+	if (s_bCore1Running.load (std::memory_order_acquire))
 	{
 		return TRUE;
 	}
 
-	// Starting the secondary cores also switches Circle's spin locks from
-	// no-ops to real locks (CSpinLock::Enable).  Nothing in this port relied
-	// on them being no-ops, but it is the one global effect of this call and
-	// worth knowing if something starts to stall after it.
-	s_pCores = new CBareCores;
-	if (!s_pCores->Initialize ())
+	if (!BareCoresRun (1, Core1Loop))
 	{
-		CLogger::Get ()->Write (FromMidi, LogWarning, "cannot start core 1: MIDI off");
+		CLogger::Get ()->Write (FromMidi, LogWarning, "core 1 not available: MIDI off");
 		return FALSE;
-	}
-
-	for (unsigned i = 0; i < 100 && !s_bCore1Running.load (std::memory_order_acquire); i++)
-	{
-		CTimer::SimpleMsDelay (1);
 	}
 
 	return s_bCore1Running.load (std::memory_order_acquire) ? TRUE : FALSE;
@@ -574,6 +552,7 @@ boolean BareMidiOpen (const char *pDevice, const char *pConfig)
 	s_OpenDevice = pDevice;
 	s_OpenConfig = pConfig != nullptr ? pConfig : "";
 	s_pSynth.store (pSynth);
+	BareCoresWake ();
 	return TRUE;
 #else
 	(void) pConfig;

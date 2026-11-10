@@ -301,12 +301,41 @@ void    BareAudioStats (u64 *pQueuedFrames, u64 *pDroppedFrames,
 u64     BareAudioDroppedSamples (void);
 
 // ---------------------------------------------------------------------------
+// Secondary cores - bare_cores.cpp
+// ---------------------------------------------------------------------------
+
+/// A job for a secondary core.  Normally never returns.
+typedef void (*TBareCoreJob) (void);
+
+/// \brief Start cores 1..3 and park them (WFE) until a job is assigned.  Once,
+///\t   early.  FALSE if no secondary core came up.
+boolean BareCoresInit (void);
+
+/// \brief The core reached its parking loop.
+boolean BareCoresAlive (unsigned nCore);
+
+/// \brief Give a parked core its job.  TRUE once the core is running it;
+///\t   FALSE if the core is not alive or already has a job.
+boolean BareCoresRun (unsigned nCore, TBareCoreJob pJob);
+
+/// \brief The core is running a job right now.
+boolean BareCoresIsRunning (unsigned nCore);
+
+/// \brief Sleep the calling core until some core calls BareCoresWake() (WFE).
+///\t   May return early; callers re-check their condition in a loop.
+void    BareCoresWait (void);
+
+/// \brief Wake every core sleeping in BareCoresWait() (DSB + SEV).
+void    BareCoresWake (void);
+
+// ---------------------------------------------------------------------------
 // MIDI - bare_midi.cpp (MT-32 / General MIDI rendered on core 1)
 // ---------------------------------------------------------------------------
 
-/// \brief Start core 1 for the synthesizers.  FALSE if the build has no MIDI
-///\t   libraries (scripts/build-midi-libs.sh was not run) or the core did not
-///\t   start; everything else in this section is then a harmless no-op.
+/// \brief Give core 1 the synthesizer loop (BareCoresInit() must have run).
+///\t   FALSE if the build has no MIDI libraries (scripts/build-midi-libs.sh
+///\t   was not run) or core 1 is not available; everything else in this
+///\t   section is then a harmless no-op.
 boolean BareMidiInit (unsigned nSampleRate);
 
 /// \brief Load and publish a synthesizer: pDevice is the [midi] mididevice
