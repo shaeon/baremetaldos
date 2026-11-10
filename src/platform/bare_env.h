@@ -395,6 +395,18 @@ void BareSysInfoSetPerformance (void);
 ///\t   which is a call into the VideoCore and too slow to do per frame).
 void BareSysInfoRefresh (void);
 
+/// \brief Mailbox proxy: with it on, core 0 never calls the firmware mailbox -
+///\t   clock changes are posted and the clocks, temperature and throttling
+///\t   bits are read by the core that calls BareSysInfoServiceTick() (the
+///\t   video presenter, which waits for vsync through the mailbox).  Turning
+///\t   it off requires that core to have stopped calling the service.
+void    BareSysInfoSetMailboxProxy (boolean bOn);
+boolean BareSysInfoMailboxProxy (void);
+
+/// \brief On the mailbox owner core, between frames: apply a posted clock
+///\t   change and refresh the published readings.  No-op with the proxy off.
+void    BareSysInfoServiceTick (void);
+
 /// \brief Last values read.  Any pointer may be null.  MHz and degrees
 ///\t   Celsius; 0 means "the firmware did not answer".
 void BareSysInfoGet (unsigned *pArmMHz, unsigned *pCoreMHz, unsigned *pCelsius);

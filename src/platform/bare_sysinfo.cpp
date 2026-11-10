@@ -43,6 +43,8 @@
 // (at your option) any later version.
 //
 #include "bare_env.h"
+
+#include <atomic>
 #include "governor_policy.h"
 
 #include <circle/machineinfo.h>
@@ -72,6 +74,37 @@ unsigned s_nTemperature = 0;	// degrees Celsius, 0 = not available
 u64 s_nLastRefreshMicros = 0;
 
 u32 s_nFirmwareMode = 0;	// PROPTAG_GET_THROTTLED: bits, see below
+
+// ---------------------------------------------------------------------------
+// Mailbox proxy
+// ---------------------------------------------------------------------------
+//
+// Why core 0 hands the mailbox to another core while the emulator runs:
+// CBcmMailBox::WriteRead() holds a spin lock for the whole round trip, and the
+// video presenter on core 2 waits for vertical sync through the same mailbox
+// (PROPTAG_WAIT_FOR_VSYNC answers at the next vsync, up to 16.7 ms later).  A
+// clock change or a temperature read from core 0 during that wait would spin
+// on the lock and stall the emulated machine for up to a frame.
+//
+// So with the proxy on, core 0 never touches the mailbox:
+//
+//   * SetArmClock() posts the target rate (latest wins) and returns;
+//   * BareSysInfoRefresh() copies the values the owner core published;
+//   * the owner core calls BareSysInfoServiceTick() between frames, which
+//     applies a pending clock change (including the settling wait) and
+//     re-reads clocks, temperature and the throttling bits every
+//     RefreshMicros.
+//
+// With the proxy off - before the presenter starts, after it stops, or on a
+// build where core 2 never came up - everything is as it was: direct calls
+// on core 0.
+std::atomic<bool> s_bProxy {false};
+std::atomic<unsigned> s_nClockRequestHz {0};	// 0 = nothing pending
+std::atomic<unsigned> s_nPubArmHz {0};
+std::atomic<unsigned> s_nPubCoreHz {0};
+std::atomic<unsigned> s_nPubCelsius {0};
+std::atomic<u32> s_nPubFirmwareMode {0};
+u64 s_nServiceLastReadMicros = 0;		// owner core only
 
 // What the firmware did NOT give us, and why the panel lost its per-core
 // figure: PROPTAG_GET_CLOCK_RATE_MEASURED (0x00030047) is defined in Circle's
@@ -322,7 +355,8 @@ u64 NowMicros (void)
 }
 
 /// \brief Ask the firmware for one ARM clock rate.  Returns FALSE on failure.
-boolean SetArmClock (unsigned nHz)
+///\t   The mailbox call itself; SetArmClock() decides who makes it.
+boolean MailboxSetArmClock (unsigned nHz)
 {
 	CBcmPropertyTags Tags;
 	TPropertyTagSetClockRate Tag = {};
@@ -346,6 +380,21 @@ boolean SetArmClock (unsigned nHz)
 	CTimer::SimpleusDelay (400);
 
 	return TRUE;
+}
+
+/// \brief Change the ARM clock: directly, or through the owner core when the
+///\t   mailbox proxy is on (then it is applied within one frame and this
+///\t   reports success at once, which is what the governor's bookkeeping
+///\t   needs - it measures in seconds, not frames).
+boolean SetArmClock (unsigned nHz)
+{
+	if (s_bProxy.load (std::memory_order_acquire))
+	{
+		s_nClockRequestHz.store (nHz, std::memory_order_release);
+		return TRUE;
+	}
+
+	return MailboxSetArmClock (nHz);
 }
 
 /// \brief Move to level nTo, if the firmware agrees.  Resets the counters.
@@ -956,6 +1005,15 @@ void BareSysInfoRefresh (void)
 
 	s_nLastRefreshMicros = nNow;
 
+	if (s_bProxy.load (std::memory_order_acquire))
+	{
+		s_nArmClockHz = s_nPubArmHz.load (std::memory_order_relaxed);
+		s_nCoreClockHz = s_nPubCoreHz.load (std::memory_order_relaxed);
+		s_nTemperature = s_nPubCelsius.load (std::memory_order_relaxed);
+		s_nFirmwareMode = s_nPubFirmwareMode.load (std::memory_order_relaxed);
+		return;
+	}
+
 	s_nArmClockHz = ReadClockRate (CLOCK_ID_ARM);
 	s_nCoreClockHz = ReadClockRate (CLOCK_ID_CORE);
 	s_nTemperature = ReadTemperature ();
@@ -1006,4 +1064,71 @@ unsigned BareSysInfoThisCore (void)
 	// is always 0, but the panel prints it so that the day a second task is
 	// moved to another core, the number changes by itself.
 	return CMultiCoreSupport::ThisCore ();
+}
+
+// ---------------------------------------------------------------------------
+// Mailbox proxy - public side
+// ---------------------------------------------------------------------------
+
+void BareSysInfoSetMailboxProxy (boolean bOn)
+{
+	if (bOn)
+	{
+		// Seed the published values from core 0's cache, so that the panel
+		// does not show zeros until the owner's first read.
+		s_nPubArmHz.store (s_nArmClockHz, std::memory_order_relaxed);
+		s_nPubCoreHz.store (s_nCoreClockHz, std::memory_order_relaxed);
+		s_nPubCelsius.store (s_nTemperature, std::memory_order_relaxed);
+		s_nPubFirmwareMode.store (s_nFirmwareMode, std::memory_order_relaxed);
+		s_nServiceLastReadMicros = 0;
+		s_bProxy.store (true, std::memory_order_release);
+		return;
+	}
+
+	// Off: the caller guarantees the owner core no longer calls the service.
+	// A clock change it had not applied yet is applied here, directly.
+	s_bProxy.store (false, std::memory_order_release);
+	const unsigned nPending = s_nClockRequestHz.exchange (0, std::memory_order_acq_rel);
+	if (nPending != 0)
+	{
+		(void) MailboxSetArmClock (nPending);
+	}
+}
+
+boolean BareSysInfoMailboxProxy (void)
+{
+	return s_bProxy.load (std::memory_order_acquire) ? TRUE : FALSE;
+}
+
+void BareSysInfoServiceTick (void)
+{
+	if (!s_bProxy.load (std::memory_order_acquire))
+	{
+		return;
+	}
+
+	const unsigned nPending = s_nClockRequestHz.exchange (0, std::memory_order_acq_rel);
+	if (nPending != 0)
+	{
+		(void) MailboxSetArmClock (nPending);
+		s_nServiceLastReadMicros = 0;	// read the result back now
+	}
+
+	const u64 nNow = BareMicros ();
+	if (s_nServiceLastReadMicros != 0 && nNow - s_nServiceLastReadMicros < RefreshMicros)
+	{
+		return;
+	}
+	s_nServiceLastReadMicros = nNow != 0 ? nNow : 1;
+
+	s_nPubArmHz.store (ReadClockRate (CLOCK_ID_ARM), std::memory_order_relaxed);
+	s_nPubCoreHz.store (ReadClockRate (CLOCK_ID_CORE), std::memory_order_relaxed);
+	s_nPubCelsius.store (ReadTemperature (), std::memory_order_relaxed);
+
+	CBcmPropertyTags Tags;
+	TPropertyTagSimple Tag = {};
+	if (Tags.GetTag (PROPTAG_GET_THROTTLED, &Tag, sizeof Tag, 4))
+	{
+		s_nPubFirmwareMode.store (Tag.nValue, std::memory_order_relaxed);
+	}
 }
