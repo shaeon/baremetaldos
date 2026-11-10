@@ -44,6 +44,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The scripts are invoked as ./scripts/... and need the executable bit.
+      # The repository records it now, but a checkout from a tree that lost
+      # it (an upload through the web, a filesystem without modes) would fail
+      # with "Permission denied" - this is the README's "chmod after cloning".
+      - name: Make the scripts executable
+        run: chmod +x scripts/*.sh scripts/hostcheck/*.sh
+
       - name: Fetch DOSBox-core at the pinned revision
         run: make fetch
 
@@ -59,6 +66,13 @@ jobs:
         rasppi: [3, 4, 5]
     steps:
       - uses: actions/checkout@v4
+
+      # The scripts are invoked as ./scripts/... and need the executable bit.
+      # The repository records it now, but a checkout from a tree that lost
+      # it (an upload through the web, a filesystem without modes) would fail
+      # with "Permission denied" - this is the README's "chmod after cloning".
+      - name: Make the scripts executable
+        run: chmod +x scripts/*.sh scripts/hostcheck/*.sh
 
       - name: Host packages
         run: |
