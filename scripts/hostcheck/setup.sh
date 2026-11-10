@@ -418,6 +418,7 @@ public:
 	u32 GetDepth (void) const;
 	uintptr GetBuffer (void) const;
 	boolean SetVirtualOffset (u32 nOffsetX, u32 nOffsetY);
+	boolean WaitForVerticalSync (void);
 };
 EOF
 

@@ -301,6 +301,34 @@ void    BareAudioStats (u64 *pQueuedFrames, u64 *pDroppedFrames,
 u64     BareAudioDroppedSamples (void);
 
 // ---------------------------------------------------------------------------
+// Video presentation on core 2 - bare_video.cpp
+// ---------------------------------------------------------------------------
+
+/// \brief Hand presentation to core 2: core 0 then only publishes frames, and
+///\t   core 2 scales them into the hidden page, flips and (bVsync) waits for
+///\t   vertical sync.  Also makes core 2 the mailbox owner.  FALSE if core 2
+///\t   is not available; core 0 then keeps presenting as before.
+boolean BareVideoPresenterStart (boolean bVsync);
+
+/// \brief Take presentation back to core 0 (before anything else draws on
+///\t   the screen, e.g. at shutdown).  Waits for core 2 to stop; leaves the
+///\t   last picture on page 0.
+void    BareVideoPresenterStop (void);
+boolean BareVideoPresenterActive (void);
+
+struct TBareVideoPresenterStats
+{
+	boolean bRunning;	///< core 2 is in its loop
+	boolean bTwoPages;	///< the firmware granted the second page
+	boolean bVsync;		///< vsync asked for and the firmware honours it
+	u64 nShown;		///< frames flipped onto the screen
+	u64 nOverwritten;	///< frames replaced before core 2 took them
+	unsigned nLastMicros;	///< scaling time of the last frame
+	unsigned nPeakMicros;	///< worst scaling time since the previous call
+};
+void    BareVideoPresenterStats (TBareVideoPresenterStats *pStats);
+
+// ---------------------------------------------------------------------------
 // Secondary cores - bare_cores.cpp
 // ---------------------------------------------------------------------------
 

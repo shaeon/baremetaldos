@@ -31,13 +31,16 @@
 // (at your option) any later version.
 //
 #include "bare_env.h"
+#include "frame_exchange.h"
 
 #include <circle/bcmframebuffer.h>
 #include <circle/chargenerator.h>
 #include <circle/logger.h>
 #include <circle/synchronize.h>
+#include <circle/timer.h>
 #include <circle/util.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 
@@ -196,6 +199,10 @@ u32 *s_pMirror = nullptr;
 unsigned s_nMirrorPixels = 0;		// allocated
 unsigned s_nMirrorWidth = 0;		// valid
 unsigned s_nMirrorHeight = 0;
+
+// --- core 2 presenter (see "Presentation on core 2" at the end of the file) ---
+bareframe::CFrameExchange s_Frames;		// core 0 -> core 2
+std::atomic<bool> s_bPresenterOn {false};	// core 0 publishes instead of drawing
 
 
 u32 *FrameBufferWords (void)
@@ -777,6 +784,8 @@ void BareVideoDeinit (void)
 	s_pFrameBuffer = nullptr;
 }
 
+static void PresentVisibleTo (u32 *pDst, const u32 *pPixels, unsigned nWidth,
+			      unsigned nHeight, unsigned nPitchBytes);
 static void PresentVisible (const u32 *pPixels, unsigned nWidth, unsigned nHeight,
 			    unsigned nPitchBytes);
 
@@ -855,6 +864,26 @@ void BareVideoPresent (const u32 *pPixels, unsigned nWidth, unsigned nHeight,
 	// source is 1920 wide, which DOSBox never produces.
 	if (s_pFrameBuffer == nullptr || pPixels == nullptr || nWidth == 0 || nHeight == 0)
 	{
+		return;
+	}
+
+	// With the core 2 presenter running, core 0 only hands the frame over:
+	// one copy into the triple buffer (which replaces the mirror copy below,
+	// so it costs no more than before) and the sampled hash for the
+	// governor.  Scaling, page flipping and vsync happen on core 2.
+	if (s_bPresenterOn.load (std::memory_order_acquire))
+	{
+		u64 nHash = 0;
+		if (s_Frames.Copy (pPixels, nWidth, nHeight, nPitchBytes / 4, &nHash))
+		{
+			if (!s_bLastFrameHashValid || nHash != s_nLastFrameHash)
+			{
+				s_nFramesChanged++;
+				s_nLastFrameHash = nHash;
+				s_bLastFrameHashValid = TRUE;
+			}
+			BareCoresWake ();	// core 2 may be sleeping in WFE
+		}
 		return;
 	}
 
@@ -1002,10 +1031,18 @@ boolean MirrorStore (const u32 *pPixels, unsigned nWidth, unsigned nHeight,
 static void PresentVisible (const u32 *pPixels, unsigned nWidth, unsigned nHeight,
 			    unsigned nPitchBytes)
 {
+	PresentVisibleTo (FrameBufferWords (), pPixels, nWidth, nHeight, nPitchBytes);
+}
+
+// The scaler proper, into any page of the frame buffer: pDst is the first word
+// of that page.  Core 0 draws into page 0 (PresentVisible above); the core 2
+// presenter draws into whichever page is hidden.
+static void PresentVisibleTo (u32 *pDst, const u32 *pPixels, unsigned nWidth,
+			      unsigned nHeight, unsigned nPitchBytes)
+{
 	ComputeDestination (nWidth, nHeight);
 
 	const u32 nDstPitch = s_pFrameBuffer->GetPitch () / 4;
-	u32 *pDst = FrameBufferWords ();
 
 	const unsigned nSrcPitch = nPitchBytes / 4;
 
@@ -1902,4 +1939,289 @@ u64 BareVideoMicrosSinceLastFrame (void)
 	const u64 nNow = BareMicros ();
 
 	return nNow > s_nLastFrameMicros ? nNow - s_nLastFrameMicros : 0;
+}
+
+// ===========================================================================
+// Presentation on core 2
+// ===========================================================================
+//
+// While the emulator runs, core 2 does everything that puts a frame on the
+// screen, and core 0 only publishes frames into s_Frames:
+//
+//   core 0                                  core 2
+//   BareVideoPresent()                      PresenterLoop()
+//     s_Frames.Copy() + hash  --newest-->     s_Frames.Acquire()
+//     SEV                                     scale into the HIDDEN page
+//                                             SetVirtualOffset(that page)
+//                                             WaitForVerticalSync()
+//                                             BareSysInfoServiceTick()
+//
+// Two pages: BareVideoInit() asks the firmware for a virtual height of twice
+// the mode, and the presenter only ever draws into the page that is not being
+// scanned out, so there is no tearing.  If the firmware granted one page only,
+// the presenter draws into it and flips nothing (same picture as before, minus
+// the work on core 0).
+//
+// Vertical sync: after a flip the presenter waits for vsync, so that it never
+// starts the next frame in the page the display has not finished leaving.  The
+// emulator is NOT paced by this - core 0 keeps its own clock, and a frame that
+// arrives while core 2 waits simply replaces the previous one in the triple
+// buffer (counted as overwritten).  DOS at 70 Hz on a 60 Hz display therefore
+// drops about one frame in seven, instead of tearing.
+//
+// The wait goes through the firmware mailbox and holds its spin lock until the
+// vsync, which is why the presenter is also the mailbox owner while it runs
+// (BareSysInfoSetMailboxProxy): core 0 never has to take that lock.
+//
+// When there is nothing new, core 2 sleeps in WFE.  Core 0 wakes it with SEV
+// when it publishes, and the generic timer's event stream (enabled below, on
+// core 2 only) wakes it about every millisecond so that the mailbox service
+// keeps running while the picture is still.
+//
+// Not yet here (next step): the status slots, the footer and the boot text,
+// which core 0 still draws into page 0.  Until they move, the presenter is
+// not started by default.
+
+namespace {
+
+std::atomic<bool> s_bPresenterStop {false};
+std::atomic<bool> s_bPresenterRunning {false};
+std::atomic<bool> s_bPresenterVsync {true};
+
+std::atomic<u64> s_nPresenterShown {0};		// frames flipped onto the screen
+std::atomic<unsigned> s_nPresenterLastMicros {0};	// scale time of the last frame
+std::atomic<unsigned> s_nPresenterPeakMicros {0};	// worst since the last stats read
+std::atomic<bool> s_bPresenterTwoPages {false};
+std::atomic<bool> s_bPresenterVsyncWorks {false};
+
+unsigned s_nFrontPage = 0;		// core 2 only while it runs
+
+// The generic timer's event stream: one event every 2^(EVNTI+1) counter
+// ticks.  EVNTI = 14 is 0.6 ms with the 54 MHz counter of a Pi 4 / Pi 5 and
+// 1.7 ms with the 19.2 MHz counter of a Pi 3 - short enough for the mailbox
+// service and for not missing a published frame, long enough to keep the
+// core asleep almost all of the time it has nothing to do.
+void EnableEventStream (void)
+{
+#if AARCH == 64
+	u64 nCntKCtl;
+	asm volatile ("mrs %0, cntkctl_el1" : "=r" (nCntKCtl));
+	nCntKCtl &= ~(u64) 0xFC;		// EVNTI [7:4], EVNTDIR [3], EVNTEN [2]
+	nCntKCtl |= (14u << 4) | (1u << 2);
+	asm volatile ("msr cntkctl_el1, %0" :: "r" (nCntKCtl));
+	asm volatile ("isb");
+#endif
+}
+
+u32 *PageWords (unsigned nPage)
+{
+	return FrameBufferWords () + static_cast<uintptr_t> (nPage) * s_nModeHeight
+				     * (s_pFrameBuffer->GetPitch () / 4);
+}
+
+// Black outside the picture rectangle, in one page.  Same rectangles as
+// BareVideoClearOutside(), for any page.
+void ClearOutsidePage (unsigned nPage)
+{
+	const u32 nPitch = s_pFrameBuffer->GetPitch () / 4;
+	u32 *pDst = PageWords (nPage);
+
+	FillRect (pDst, nPitch, 0, 0, s_nModeWidth, s_nDstY, 0x00000000);
+	FillRect (pDst, nPitch, 0, s_nDstY + s_nDstHeight, s_nModeWidth,
+		  s_nModeHeight > s_nDstY + s_nDstHeight
+			  ? s_nModeHeight - (s_nDstY + s_nDstHeight) : 0,
+		  0x00000000);
+	FillRect (pDst, nPitch, 0, s_nDstY, s_nDstX, s_nDstHeight, 0x00000000);
+	FillRect (pDst, nPitch, s_nDstX + s_nDstWidth, s_nDstY,
+		  s_nModeWidth > s_nDstX + s_nDstWidth
+			  ? s_nModeWidth - (s_nDstX + s_nDstWidth) : 0,
+		  s_nDstHeight, 0x00000000);
+}
+
+void PresenterLoop (void)
+{
+	EnableEventStream ();
+
+	const boolean bTwoPages = s_pFrameBuffer->GetVirtHeight () >= 2 * s_nModeHeight;
+	s_bPresenterTwoPages.store (bTwoPages, std::memory_order_relaxed);
+
+	// Start on page 0, which is what the display shows now.
+	s_nFrontPage = 0;
+	if (bTwoPages)
+	{
+		(void) s_pFrameBuffer->SetVirtualOffset (0, 0);
+	}
+
+	// The destination rectangle each page was last cleared for.  A page
+	// whose margins are stale (first use, or the source size changed) is
+	// cleared before the picture is drawn into it.
+	unsigned nClearedFor[2][4] = {};
+
+	bool bVsyncWorks = true;
+	s_bPresenterRunning.store (true, std::memory_order_release);
+
+	while (!s_bPresenterStop.load (std::memory_order_acquire))
+	{
+		BareSysInfoServiceTick ();
+
+		const bareframe::TFrame *pFrame = s_Frames.Acquire ();
+		if (pFrame == nullptr || pFrame->pPixels == nullptr)
+		{
+			WaitForEvent ();
+			continue;
+		}
+
+		const unsigned nBack = bTwoPages ? 1 - s_nFrontPage : 0;
+		const u64 nStart = BareMicros ();
+
+		ComputeDestination (pFrame->nWidth, pFrame->nHeight);
+		const unsigned Rect[4] = { s_nDstX, s_nDstY, s_nDstWidth, s_nDstHeight };
+		if (memcmp (nClearedFor[nBack], Rect, sizeof Rect) != 0)
+		{
+			ClearOutsidePage (nBack);
+			memcpy (nClearedFor[nBack], Rect, sizeof Rect);
+		}
+
+		PresentVisibleTo (PageWords (nBack), pFrame->pPixels, pFrame->nWidth,
+				  pFrame->nHeight, pFrame->nWidth * sizeof (u32));
+
+		const unsigned nMicros = static_cast<unsigned> (BareMicros () - nStart);
+		s_nPresenterLastMicros.store (nMicros, std::memory_order_relaxed);
+		if (nMicros > s_nPresenterPeakMicros.load (std::memory_order_relaxed))
+		{
+			s_nPresenterPeakMicros.store (nMicros, std::memory_order_relaxed);
+		}
+
+		if (bTwoPages)
+		{
+			// The frame buffer is device memory (Circle maps GPU memory
+			// above the ARM's share as DEVICE): the writes are not cached,
+			// and the mailbox call below orders them before the flip.
+			if (s_pFrameBuffer->SetVirtualOffset (0, nBack * s_nModeHeight))
+			{
+				s_nFrontPage = nBack;
+			}
+		}
+
+		if (bVsyncWorks && s_bPresenterVsync.load (std::memory_order_relaxed))
+		{
+			// A firmware that does not know the tag answers FALSE at once;
+			// stop asking instead of calling it 60 times a second.
+			bVsyncWorks = s_pFrameBuffer->WaitForVerticalSync ();
+			s_bPresenterVsyncWorks.store (bVsyncWorks, std::memory_order_relaxed);
+		}
+
+		s_nPresenterShown.fetch_add (1, std::memory_order_relaxed);
+	}
+
+	// Leave the screen the way core 0 expects to find it: the latest picture
+	// on page 0, page 0 scanned out.  Core 0 draws into page 0 only.
+	const bareframe::TFrame *pLast = s_Frames.Current ();
+	if (pLast != nullptr && pLast->pPixels != nullptr && s_nFrontPage != 0)
+	{
+		ComputeDestination (pLast->nWidth, pLast->nHeight);
+		ClearOutsidePage (0);
+		PresentVisibleTo (PageWords (0), pLast->pPixels, pLast->nWidth,
+				  pLast->nHeight, pLast->nWidth * sizeof (u32));
+	}
+	if (bTwoPages)
+	{
+		(void) s_pFrameBuffer->SetVirtualOffset (0, 0);
+	}
+	s_nFrontPage = 0;
+
+	s_bPresenterRunning.store (false, std::memory_order_release);
+	// Returning parks core 2 again (bare_cores.cpp); it can be restarted.
+}
+
+} // namespace
+
+boolean BareVideoPresenterStart (boolean bVsync)
+{
+	if (s_bPresenterOn.load (std::memory_order_acquire))
+	{
+		return TRUE;
+	}
+
+	if (s_pFrameBuffer == nullptr || !BareCoresAlive (2) || BareCoresIsRunning (2))
+	{
+		return FALSE;
+	}
+
+	s_Frames.Reset ();
+	s_bPresenterStop.store (false, std::memory_order_relaxed);
+	s_bPresenterVsync.store (bVsync != FALSE, std::memory_order_relaxed);
+	s_nPresenterShown.store (0, std::memory_order_relaxed);
+	s_nPresenterPeakMicros.store (0, std::memory_order_relaxed);
+
+	// Core 2 owns the mailbox from now on (it waits for vsync through it).
+	BareSysInfoSetMailboxProxy (TRUE);
+
+	if (!BareCoresRun (2, PresenterLoop))
+	{
+		BareSysInfoSetMailboxProxy (FALSE);
+		CLogger::Get ()->Write (FromVideo, LogWarning,
+					"core 2 not available: presenting on core 0");
+		return FALSE;
+	}
+
+	s_bPresenterOn.store (true, std::memory_order_release);
+	CLogger::Get ()->Write (FromVideo, LogNotice, "presenting on core 2 (vsync %s)",
+				bVsync ? "on" : "off");
+	return TRUE;
+}
+
+void BareVideoPresenterStop (void)
+{
+	if (!s_bPresenterOn.load (std::memory_order_acquire))
+	{
+		return;
+	}
+
+	// Core 0 stops publishing first, so that nothing new arrives while core
+	// 2 winds down; then core 2 is asked to stop and waited for.
+	s_bPresenterOn.store (false, std::memory_order_release);
+	s_bPresenterStop.store (true, std::memory_order_release);
+	BareCoresWake ();
+
+	// A vsync wait is at most one refresh (17 ms at 60 Hz, 33 ms at 30 Hz);
+	// half a second is a hung firmware call, and then the screen is not
+	// worth waiting for.
+	for (unsigned nWait = 0; nWait < 500 && BareCoresIsRunning (2); nWait++)
+	{
+		CTimer::SimpleMsDelay (1);
+	}
+
+	BareSysInfoSetMailboxProxy (FALSE);
+
+	// Core 0 is the drawer again: give it the last picture as its mirror, so
+	// that BareVideoRepaint() and the screenshot keep working.
+	const bareframe::TFrame *pLast = s_Frames.Current ();
+	if (pLast != nullptr && pLast->pPixels != nullptr)
+	{
+		(void) MirrorStore (pLast->pPixels, pLast->nWidth, pLast->nHeight,
+				    pLast->nWidth * static_cast<unsigned> (sizeof (u32)));
+	}
+}
+
+boolean BareVideoPresenterActive (void)
+{
+	return s_bPresenterOn.load (std::memory_order_acquire) ? TRUE : FALSE;
+}
+
+void BareVideoPresenterStats (TBareVideoPresenterStats *pStats)
+{
+	if (pStats == nullptr)
+	{
+		return;
+	}
+
+	pStats->bRunning = s_bPresenterRunning.load (std::memory_order_acquire) ? TRUE : FALSE;
+	pStats->bTwoPages = s_bPresenterTwoPages.load (std::memory_order_relaxed) ? TRUE : FALSE;
+	pStats->bVsync = s_bPresenterVsync.load (std::memory_order_relaxed)
+			 && s_bPresenterVsyncWorks.load (std::memory_order_relaxed) ? TRUE : FALSE;
+	pStats->nShown = s_nPresenterShown.load (std::memory_order_relaxed);
+	pStats->nOverwritten = s_Frames.Overwritten ();
+	pStats->nLastMicros = s_nPresenterLastMicros.load (std::memory_order_relaxed);
+	pStats->nPeakMicros = s_nPresenterPeakMicros.exchange (0, std::memory_order_relaxed);
 }
