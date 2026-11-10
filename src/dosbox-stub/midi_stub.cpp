@@ -3,7 +3,8 @@
 //
 // by @mmoroca & arena.ai 2026  -  https://arena.ai
 //
-// BM-DOS - the MIDI side of DOSBox, wired to nothing.
+// BM-DOS - the MIDI side of DOSBox.  Originally wired to nothing; now to
+// the synthesizers on core 1 when the build has them (see the end of the file).
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -53,39 +54,78 @@
 // (AdLib, Sound Blaster FM) is a completely separate path - adlib.cpp, dbopl.cpp
 // and nukedopl.c - and is not touched by any of this.
 //
-// If MIDI is ever wanted on the Pi (a USB-MIDI keyboard, or a software MT-32
-// renderer), the change is here: replace these definitions with the real
-// midi.cpp and add the backend it needs.  That is why this file is called a
-// stub and not "midi support".
+// That was the first version of this file, and it still is the behaviour when
+// [midi] asks for no device or the build has no MIDI libraries.  The software
+// MT-32 / General MIDI renderer this paragraph used to anticipate is now in
+// bare_midi.cpp; the entry points below hand it the bytes.  midi.cpp is still
+// not built: its device negotiation has nothing to negotiate with here.
 //
 #include "dosbox.h"
 #include "midi.h"
 #include "setup.h"
 
+#include "bare_env.h"
+
+#include <circle/logger.h>
+
+#include <string>
+
 DB_Midi midi;
 
-void MIDI_RawOutByte (Bit8u /*data*/)
+// ---------------------------------------------------------------------------
+// MIDI to core 1 (bare_midi.cpp)
+// ---------------------------------------------------------------------------
+//
+// The three entry points DOSBox calls are now wired to a synthesizer when
+// [midi] asks for one and the build has the libraries:
+//
+//   mididevice = mt32         Munt, ROMs from /dosbox/system/
+//                             (midiconfig = cm32l to prefer the CM-32L pair)
+//   mididevice = fluidsynth   FluidSynth, midiconfig = path of the .sf2
+//                             (default /dosbox/system/default.sf2)
+//   anything else             as before: no MIDI device
+//
+// The byte stream is NOT parsed here.  DOSBox's own midi.cpp parses it on the
+// emulator's thread and calls the device per message; this port moves the
+// whole device to core 1, so the parser (midi_queue.h) goes with it and core 0
+// only appends bytes to a ring.  That keeps the cost on core 0 at one store per
+// byte, whatever the device is.
+//
+// What is NOT reproduced from midi.cpp: the SysEx delays for an MT-32 rev. 0
+// ("delaysysex").  They exist for real hardware with a slow MIDI input; Munt
+// takes SysEx at any speed.
+
+void MIDI_RawOutByte (Bit8u data)
 {
-	// Nothing is listening.  See the header comment for why this cannot simply
-	// be an undefined symbol.
+	BareMidiOutByte (data);
 }
 
 bool MIDI_Available (void)
 {
-	return false;
+	return BareMidiActive () != FALSE;
 }
 
-void MIDI_Init (Section * /*pSection*/)
+void MIDI_Init (Section *pSection)
 {
-	// Nothing to do, and deliberately nothing to say either.
-	//
-	// The obvious line here is LOG_MSG("MIDI disabled...").  In DOSBox, LOG_MSG
-	// is a macro for GFX_ShowMsg(), which lives in src/gui/sdlmain.cpp - the SDL
-	// frontend that this port does not build.  Using it would pull the whole SDL
-	// message queue into the link for the sake of one line of text.  (That is
-	// exactly what happened: the first version of this file did use it and the
-	// link failed with "undefined reference to GFX_ShowMsg".)
-	//
-	// If this needs to be visible, BareLog() in bare_env.h is the port's own
-	// logging path and does not depend on the frontend.
+	// LOG_MSG is not available here (see the history of this file: it pulls
+	// in the SDL frontend), so the result goes to Circle's logger.
+	auto *pProps = static_cast<Section_prop *> (pSection);
+	const char *pDevice = pProps->Get_string ("mididevice");
+	const char *pConfig = pProps->Get_string ("midiconfig");
+
+	if (BareMidiOpen (pDevice, pConfig))
+	{
+		midi.available = true;
+		CLogger::Get ()->Write ("midi", LogNotice, "MIDI device: %s", BareMidiName ());
+	}
+	else
+	{
+		midi.available = false;
+		if (pDevice != nullptr && pDevice[0] != '\0' && std::string (pDevice) != "none"
+		    && std::string (pDevice) != "default")
+		{
+			CLogger::Get ()->Write ("midi", LogWarning,
+						"mididevice=%s requested but not available", pDevice);
+		}
+	}
 }

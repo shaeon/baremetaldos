@@ -544,9 +544,38 @@ endif
 # and this is the one line that changes it.
 DOSBOX_DEFINES += $(DOSBOX_DYNAREC_DEFINE)
 
-APP_DEFINES = -DDOSBOX_SNAPSHOT=\"$(PROJECT_SNAPSHOT)\" $(BARE_AUDIO_DEVICE_DEFINE)
+# MT-32 / General MIDI on core 1 (src/platform/bare_midi.cpp).  The two
+# synthesizer libraries are built by scripts/build-midi-libs.sh into
+# third_party/midi-rpi$(RASPPI); when they are there the kernel links them and
+# [midi] mididevice=mt32|fluidsynth works, when they are not the build is the
+# same as before and MIDI stays off.  Detection, not a switch, so that a clone
+# that never ran the script still builds; "make MIDI=0" forces it off.
+MIDI_DIR	?= $(CURDIR)/third_party/midi-rpi$(RASPPI)
+ifeq ($(MIDI),0)
+MIDI_ENABLED	:= 0
+else ifneq ($(wildcard $(MIDI_DIR)/lib/libmt32emu.a),)
+ifneq ($(wildcard $(MIDI_DIR)/lib/libfluidsynth.a),)
+MIDI_ENABLED	:= 1
+else
+MIDI_ENABLED	:= 0
+endif
+else
+MIDI_ENABLED	:= 0
+endif
 
-CXXFLAGS_APP = $(CPPFLAGS) -std=gnu++23 $(APP_INCLUDES) $(APP_DEFINES) $(APP_WARNINGS)
+ifeq ($(MIDI_ENABLED),1)
+BARE_MIDI_DEFINE := -DBARE_MIDI=1
+BARE_MIDI_INCLUDES := -I$(MIDI_DIR)/include
+BARE_MIDI_LIBS := $(MIDI_DIR)/lib/libmt32emu.a $(MIDI_DIR)/lib/libfluidsynth.a
+else
+BARE_MIDI_DEFINE := -DBARE_MIDI=0
+BARE_MIDI_INCLUDES :=
+BARE_MIDI_LIBS :=
+endif
+
+APP_DEFINES = -DDOSBOX_SNAPSHOT=\"$(PROJECT_SNAPSHOT)\" $(BARE_AUDIO_DEVICE_DEFINE) $(BARE_MIDI_DEFINE)
+
+CXXFLAGS_APP = $(CPPFLAGS) -std=gnu++23 $(APP_INCLUDES) $(BARE_MIDI_INCLUDES) $(APP_DEFINES) $(APP_WARNINGS)
 
 # ---------------------------------------------------------------------------
 # Sources
@@ -565,6 +594,7 @@ APP_SRCS := \
 	src/platform/bare_fs.cpp \
 	src/platform/bare_sysinfo.cpp \
 	src/platform/bare_dynarec.cpp \
+	src/platform/bare_midi.cpp \
 	src/dosbox-stub/midi_stub.cpp \
 	src/dosbox-stub/posix_stubs.cpp
 
@@ -969,7 +999,7 @@ $(foreach src,$(DOSBOX_C_SRCS) $(LIBRETRO_COMMON_SRCS),$(eval $(call DOSBOX_C_OB
 # lib/sound is built by Circle's own makeall ("cd sound"), it is simply missing
 # from the variable.  Appended at the end for readability: Rules.mk wraps all of
 # $(LIBS) in --start-group/--end-group, so link order does not matter here.
-LIBS := $(CIRCLE_STDLIB_LIBS) $(CIRCLEHOME)/lib/sound/libsound.a
+LIBS := $(CIRCLE_STDLIB_LIBS) $(CIRCLEHOME)/lib/sound/libsound.a $(BARE_MIDI_LIBS)
 
 # ---------------------------------------------------------------------------
 # Overriding a libgloss stub that returns ENOSYS
@@ -1274,6 +1304,15 @@ check-governor:
 		-o build/governor_test scripts/hostcheck/governor_test.cpp
 	@build/governor_test
 
+# The MIDI byte parser and the core 0 <-> core 1 rings (midi_queue.h).  Two
+# threads on the host stand in for the two cores; -pthread for that.
+.PHONY: check-midi
+check-midi:
+	@mkdir -p build
+	@$(HOST_CXX) -std=gnu++23 -O1 -Wall -Wextra -Wpedantic -Wshadow -pthread \
+		-o build/midi_test scripts/hostcheck/midi_test.cpp
+	@build/midi_test
+
 # The flush sequence (bare_storage.h), against a fake FatFs.  This target exists
 # because .59 did not link: kernel.cpp called POSIX sync(), which circle-stdlib
 # does not provide, and nothing before the cross build could have noticed.  What
@@ -1332,7 +1371,7 @@ check-dynarec-hook:
 # config parser.  This is the target to run before a cross build.
 check-host: check-platform check-kernel check-bootconf check-scaling check-dynarec \
             check-coreopts check-resample check-storage check-governor check-portorder \
-            check-dynarec-hook
+            check-dynarec-hook check-midi
 print-srcs:
 	@echo $(ALL_SRCS)
 

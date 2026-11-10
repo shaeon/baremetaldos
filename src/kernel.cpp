@@ -450,6 +450,12 @@ boolean CKernel::Initialize (void)
 
 	Report ("audio: ok");
 
+	// --- MIDI synthesizers on core 1 ---------------------------------------
+	// Before the core: MIDI_Init() runs inside DOSBox's start-up and needs core
+	// 1 already waiting.  A build without the MIDI libraries, or a core that
+	// does not start, only means no MT-32 / General MIDI - not a failed boot.
+	Report ("midi: core 1 %s", BareMidiInit (MixerRate) ? "ready" : "not started (no MIDI)");
+
 	// --- input ------------------------------------------------------------
 	Report ("input: initialising");
 	if (!BareInputInit ())

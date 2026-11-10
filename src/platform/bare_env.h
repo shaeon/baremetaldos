@@ -301,6 +301,33 @@ void    BareAudioStats (u64 *pQueuedFrames, u64 *pDroppedFrames,
 u64     BareAudioDroppedSamples (void);
 
 // ---------------------------------------------------------------------------
+// MIDI - bare_midi.cpp (MT-32 / General MIDI rendered on core 1)
+// ---------------------------------------------------------------------------
+
+/// \brief Start core 1 for the synthesizers.  FALSE if the build has no MIDI
+///\t   libraries (scripts/build-midi-libs.sh was not run) or the core did not
+///\t   start; everything else in this section is then a harmless no-op.
+boolean BareMidiInit (unsigned nSampleRate);
+
+/// \brief Load and publish a synthesizer: pDevice is the [midi] mididevice
+///\t   value ("mt32" or "fluidsynth"), pConfig its midiconfig.  Core 0 only:
+///\t   it reads the card and allocates.
+boolean BareMidiOpen (const char *pDevice, const char *pConfig);
+void    BareMidiClose (void);
+boolean BareMidiActive (void);
+const char *BareMidiName (void);
+
+/// \brief One byte from the MPU-401.  Never blocks; a full ring drops it.
+void    BareMidiOutByte (u8 nByte);
+
+/// \brief Add the synthesizer's output into a batch of stereo frames, in
+///\t   place, with saturation.  Called by BareAudioQueue().
+void    BareMidiMix (s16 *pFrames, unsigned nFrames);
+
+/// \brief Times the mixer found core 1 behind, and MIDI bytes dropped.
+void    BareMidiStats (u64 *pUnderruns, u64 *pBytesDropped);
+
+// ---------------------------------------------------------------------------
 // Input - bare_input.cpp
 // ---------------------------------------------------------------------------
 

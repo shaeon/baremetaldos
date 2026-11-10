@@ -203,6 +203,18 @@ void BareAudioQueue (const s16 *pFrames, unsigned nFrames)
 	// are in the same unit as the two numbers shown next to them.
 	constexpr unsigned WriteFrameBytes = 2 * sizeof (s16);	// 16-bit stereo in
 
+	// MIDI from core 1 is mixed in here, into a copy: the batch belongs to
+	// DOSBox.  Batches are one emulated frame of audio (a few hundred frames),
+	// so the copy is small; anything larger than the buffer goes out without
+	// MIDI for the excess rather than growing a static buffer.
+	static s16 s_Mixed[4096 * 2];
+	if (BareMidiActive () && nFrames <= 4096)
+	{
+		memcpy (s_Mixed, pFrames, nFrames * WriteFrameBytes);
+		BareMidiMix (s_Mixed, nFrames);
+		pFrames = s_Mixed;
+	}
+
 	size_t nBytes = static_cast<size_t> (nFrames) * WriteFrameBytes;
 	auto *pData = reinterpret_cast<const u8 *> (pFrames);
 

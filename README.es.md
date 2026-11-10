@@ -55,7 +55,7 @@ Lo que funciona hoy:
 | Teclado, ratón y mandos USB (HID) | funciona |
 | Governor del reloj ARM, 600 MHz en el prompt de DOS | funciona |
 | Panel de estado, capturas de pantalla, apagado seguro | funciona |
-| MIDI / MT-32 | no implementado (no hay emulación de MT-32 sin sistema operativo) |
+| MIDI: MT-32 (Munt) y General MIDI (FluidSynth), generados en el núcleo 1 | funciona si se compila con `scripts/build-midi-libs.sh` |
 | CD-ROM, red, IPX, módem | no implementado |
 | Voodoo / 3dfx | no implementado |
 
@@ -191,6 +191,30 @@ descargan en `opt/` y se detiene.
 make fetch
 make check-rev        # confirma la revisión que espera el port
 ```
+
+**2b. Opcional: compilar los sintetizadores MIDI** (Munt y FluidSynth, unos
+minutos; necesita `cmake`):
+
+```bash
+./scripts/build-midi-libs.sh
+```
+
+Quedan en `third_party/midi-rpi$RASPPI/`.  El núcleo los enlaza si están y
+compila sin MIDI si no están; `make MIDI=0` lo fuerza a apagado.  Después, en la
+tarjeta: las ROM del MT-32 (`MT32_CONTROL.ROM` y `MT32_PCM.ROM`, o la pareja
+`CM32L_*`) o un SoundFont (`default.sf2`) en `/dosbox/system/`, y en
+`dosbox.conf`:
+
+```ini
+[midi]
+mididevice=mt32        # o fluidsynth
+mpu401=intelligent
+```
+
+Las ROM y los SoundFont no se incluyen.  El sintetizador corre en el núcleo 1 y
+DOSBox sigue en el 0: no se comparte nada de DOSBox, solo un anillo de bytes
+MIDI de entrada y otro de muestras de salida (`src/platform/bare_midi.cpp`).  La
+idea y el parche de FluidSynth vienen de [mt32-pi](https://github.com/dwhinham/mt32-pi).
 
 **3. Compilar la imagen del núcleo:**
 

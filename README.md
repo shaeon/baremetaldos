@@ -56,7 +56,7 @@ What works today:
 | USB keyboard, mouse, gamepads (HID) | works |
 | ARM clock governor, 600 MHz at the DOS prompt | works |
 | Status panel, screenshots, safe shutdown | works |
-| MIDI / MT-32 | not implemented (no MT-32 emulation on bare metal) |
+| MIDI: MT-32 (Munt) and General MIDI (FluidSynth), rendered on core 1 | works when built with `scripts/build-midi-libs.sh` |
 | CD-ROM, networking, IPX, modem | not implemented |
 | Voodoo / 3dfx | not implemented |
 
@@ -192,6 +192,30 @@ one into `opt/` and stops.
 make fetch
 make check-rev        # confirms the revision the port expects
 ```
+
+**2b. Optional: build the MIDI synthesizers** (Munt and FluidSynth, a few
+minutes; needs `cmake`):
+
+```bash
+./scripts/build-midi-libs.sh
+```
+
+They go to `third_party/midi-rpi$RASPPI/`.  The kernel links them when they
+are there and builds without MIDI when they are not; `make MIDI=0` forces it
+off.  Then, on the card: the MT-32 ROMs (`MT32_CONTROL.ROM` and `MT32_PCM.ROM`,
+or the `CM32L_*` pair) or a SoundFont (`default.sf2`) in `/dosbox/system/`,
+and in `dosbox.conf`:
+
+```ini
+[midi]
+mididevice=mt32        # or fluidsynth
+mpu401=intelligent
+```
+
+The ROMs and SoundFonts are not included.  The synthesizer runs on core 1 and
+DOSBox stays on core 0: nothing of DOSBox is shared, only a ring of MIDI bytes
+in and a ring of samples out (`src/platform/bare_midi.cpp`).  The approach and
+the FluidSynth patch come from [mt32-pi](https://github.com/dwhinham/mt32-pi).
 
 **3. Build the kernel image:**
 

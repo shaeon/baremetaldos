@@ -118,12 +118,29 @@ public:
 };
 EOF
 
+cat > circle/memory.h <<'EOF'
+#pragma once
+#include <circle/types.h>
+class CMemorySystem
+{
+public:
+	static CMemorySystem *Get (void);
+};
+EOF
+
+# bare_midi.cpp subclasses CMultiCoreSupport to run the synthesizers on core 1,
+# so the stub carries the constructor and the two virtuals it overrides.
 cat > circle/multicore.h <<'EOF'
 #pragma once
 #include <circle/types.h>
+class CMemorySystem;
 class CMultiCoreSupport
 {
 public:
+	CMultiCoreSupport (CMemorySystem *pMemorySystem);
+	virtual ~CMultiCoreSupport (void);
+	virtual boolean Initialize (void);
+	virtual void Run (unsigned nCore) = 0;
 	static unsigned ThisCore (void);
 };
 EOF
