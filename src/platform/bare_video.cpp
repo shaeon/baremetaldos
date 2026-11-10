@@ -32,6 +32,7 @@
 //
 #include "bare_env.h"
 #include "frame_exchange.h"
+#include "scale_weights.h"
 
 #include <circle/bcmframebuffer.h>
 #include <circle/chargenerator.h>
@@ -72,6 +73,11 @@ unsigned s_nPresentedSinceStart = 0;
 u32 *s_pRowBuffer = nullptr;
 u32 *s_pRowBuffer2 = nullptr;		// second row, for vertical interpolation
 u32 *s_pRowBuffer3 = nullptr;		// the mixed row, before it goes to the frame buffer
+
+// boot.conf scaler = sharp (true, the default) | smooth: how output rows are
+// made from source rows when the picture is enlarged by a fraction.  Set once
+// before the first frame; read by whichever core presents.
+bool s_bSharpScale = true;
 unsigned s_nRowBufferPixels = 0;
 
 CCharGenerator s_Font;
@@ -1155,40 +1161,50 @@ static void PresentVisibleTo (u32 *pDst, const u32 *pPixels, unsigned nWidth,
 			unsigned nRowA = ~0u;		// source row currently in s_pRowBuffer
 			unsigned nRowB = ~0u;		// ... and in s_pRowBuffer2
 
-			// Vertical step in fixed point, same 16 bits as the row filter.
-			const unsigned nVStep = (nHeight << 16) / s_nDstHeight;
+			// The two resampled rows, as local pointers so that they can be
+			// swapped: going down the picture, the second row of one output
+			// row is usually the first of the next, and swapping saves
+			// resampling it again.
+			u32 *pRowA = s_pRowBuffer;
+			u32 *pRowB = s_pRowBuffer2;
 
 			for (unsigned nY = 0; nY < s_nDstHeight; nY++)
 			{
-				const unsigned nVPos = nY * nVStep;
-				const unsigned nY0 = nVPos >> 16;
-				unsigned nY1 = nY0 + 1;
-				if (nY1 >= nHeight)
-				{
-					nY1 = nHeight - 1;
-				}
-
-				// Fraction of the way from nY0 to nY1, 0..256.
-				const unsigned nMix = ((nVPos & 0xFFFF) * 257) >> 16;
+				// Which source rows, and how much of the second: area sampling
+				// (boot.conf scaler = sharp, the default) or linear (smooth).
+				// See scale_weights.h.
+				const barescale::TRowMix Mix =
+					barescale::RowMix (nY, nHeight, s_nDstHeight, s_bSharpScale);
+				const unsigned nY0 = Mix.nRow0;
+				const unsigned nY1 = Mix.nRow1;
+				const unsigned nMix = Mix.nMix;
 
 				if (nRowA != nY0)
 				{
-					ResampleRowBox (pPixels + nY0 * nSrcPitch, nWidth,
-							s_pRowBuffer, s_nDstWidth);
+					if (nRowB == nY0)
+					{
+						u32 *pSwap = pRowA; pRowA = pRowB; pRowB = pSwap;
+						nRowB = nRowA;
+					}
+					else
+					{
+						ResampleRowBox (pPixels + nY0 * nSrcPitch, nWidth,
+								pRowA, s_nDstWidth);
+					}
 					nRowA = nY0;
 				}
 
 				if (nMix == 0 || nY1 == nY0)
 				{
 					memcpy (pDst + (s_nDstY + nY) * nDstPitch + s_nDstX,
-						s_pRowBuffer, s_nDstWidth * sizeof (u32));
+						pRowA, s_nDstWidth * sizeof (u32));
 					continue;
 				}
 
 				if (nRowB != nY1)
 				{
 					ResampleRowBox (pPixels + nY1 * nSrcPitch, nWidth,
-							s_pRowBuffer2, s_nDstWidth);
+							pRowB, s_nDstWidth);
 					nRowB = nY1;
 				}
 
@@ -1201,8 +1217,7 @@ static void PresentVisibleTo (u32 *pDst, const u32 *pPixels, unsigned nWidth,
 				u32 *pMix = s_pRowBuffer3;
 				for (unsigned nX = 0; nX < s_nDstWidth; nX++)
 				{
-					pMix[nX] = MixPixel (s_pRowBuffer[nX],
-							     s_pRowBuffer2[nX], nMix);
+					pMix[nX] = MixPixel (pRowA[nX], pRowB[nX], nMix);
 				}
 				memcpy (pDst + (s_nDstY + nY) * nDstPitch + s_nDstX,
 					pMix, s_nDstWidth * sizeof (u32));
@@ -2501,4 +2516,9 @@ void BareVideoPresenterStats (TBareVideoPresenterStats *pStats)
 	pStats->nOverwritten = s_Frames.Overwritten ();
 	pStats->nLastMicros = s_nPresenterLastMicros.load (std::memory_order_relaxed);
 	pStats->nPeakMicros = s_nPresenterPeakMicros.exchange (0, std::memory_order_relaxed);
+}
+
+void BareVideoSetSharpScaling (boolean bSharp)
+{
+	s_bSharpScale = bSharp != FALSE;
 }

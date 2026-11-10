@@ -476,6 +476,7 @@ boolean CKernel::Initialize (void)
 	// the screen, and falls back to core 0 if core 2 cannot take it.
 	const boolean bCore2Video = Config.nVideoCore == 2 && bCores;
 	BareVideoPresenterConfigure (bCore2Video, Config.bVsync ? TRUE : FALSE);
+	BareVideoSetSharpScaling (Config.bSharpScale ? TRUE : FALSE);
 	Report ("video: presented by core %u%s", bCore2Video ? 2u : 0u,
 		bCore2Video ? (Config.bVsync ? ", vsync on" : ", vsync off") : "");
 

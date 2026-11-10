@@ -318,6 +318,11 @@ boolean BareVideoPresenterStart (boolean bVsync);
 ///\t   picture owns the screen (first frames drawn, boot text gone).
 void    BareVideoPresenterConfigure (boolean bEnable, boolean bVsync);
 
+/// \brief From boot.conf scaler = sharp | smooth: area sampling of rows when
+///\t   the picture is enlarged by a fraction (sharp, the default), or the
+///\t   linear interpolation used before (smooth).  Before the first frame.
+void    BareVideoSetSharpScaling (boolean bSharp);
+
 /// \brief Take presentation back to core 0 (before anything else draws on
 ///\t   the screen, e.g. at shutdown).  Waits for core 2 to stop; leaves the
 ///\t   last picture on page 0.

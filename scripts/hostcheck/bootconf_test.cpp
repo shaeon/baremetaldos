@@ -163,6 +163,15 @@ static const TVideoCase VideoCases[] =
 	{ "video: vsync invalido conserva el defecto", "vsync = maybe\n", 2, true, "vsync" },
 };
 
+struct TScaleCase { const char *pName; const char *pContents; bool bWantSharp; const char *pWantWarningPart; };
+static const TScaleCase ScaleCases[] =
+{
+	{ "scaler: por defecto sharp", "display = 1280x720\n", true, nullptr },
+	{ "scaler: smooth", "scaler = smooth\n", false, nullptr },
+	{ "scaler: sharp", "scaler = sharp\n", true, nullptr },
+	{ "scaler: invalido conserva sharp", "scaler = blurry\n", true, "scaler" },
+};
+
 static void Check (bool bOk, const char *pName, const char *pWhat,
 		   const char *pGot = nullptr, const char *pWant = nullptr)
 {
@@ -274,6 +283,23 @@ int main (void)
 		{
 			Check (Config.Warning[0] == '\0', Case.pName, "sin aviso", Config.Warning, "");
 		}
+	}
+
+	for (const TScaleCase &Case : ScaleCases)
+	{
+		FILE *pFile = fopen (BOOT_CONFIG, "w");
+		if (pFile == nullptr) { Errors++; continue; }
+		fputs (Case.pContents, pFile);
+		fclose (pFile);
+
+		TBootConfig Config;
+		ReadBootConfig (&Config);
+		Check (Config.bSharpScale == Case.bWantSharp, Case.pName, "scaler");
+		if (Case.pWantWarningPart != nullptr)
+			Check (strstr (Config.Warning, Case.pWantWarningPart) != nullptr,
+			       Case.pName, "aviso", Config.Warning, Case.pWantWarningPart);
+		else
+			Check (Config.Warning[0] == '\0', Case.pName, "sin aviso", Config.Warning, "");
 	}
 
 	remove (BOOT_CONFIG);

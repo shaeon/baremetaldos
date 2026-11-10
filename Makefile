@@ -1314,6 +1314,14 @@ check-midi:
 		-o build/midi_test scripts/hostcheck/midi_test.cpp
 	@build/midi_test
 
+# Which source rows make each output row (scale_weights.h): sharp/smooth.
+.PHONY: check-scale
+check-scale:
+	@mkdir -p build
+	@$(HOST_CXX) -std=gnu++23 -O1 -Wall -Wextra -Wpedantic -Wshadow \
+		-o build/scale_weights_test scripts/hostcheck/scale_weights_test.cpp
+	@build/scale_weights_test
+
 # The DC blocker on the final audio output (audio_dcblock.h): removes a held
 # level, keeps music.
 .PHONY: check-audio
@@ -1390,7 +1398,7 @@ check-dynarec-hook:
 # config parser.  This is the target to run before a cross build.
 check-host: check-platform check-kernel check-bootconf check-scaling check-dynarec \
             check-coreopts check-resample check-storage check-governor check-portorder \
-            check-dynarec-hook check-midi check-frames check-audio
+            check-dynarec-hook check-midi check-frames check-audio check-scale
 print-srcs:
 	@echo $(ALL_SRCS)
 

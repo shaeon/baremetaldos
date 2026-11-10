@@ -489,6 +489,28 @@ frames flipped per second, frames replaced before core 2 took them, the worst
 scaling time in that second, and `vs` while vsync is in force (`1p` if the firmware
 gave one page only, so there is nothing to flip).
 
+### `scaler = sharp | smooth` and a sharp picture
+
+`scaler = sharp` (the default) enlarges the picture by area sampling in both
+directions: a screen row is the source row under it, and only the rows that fall
+on a boundary between two source rows mix them, in proportion. `smooth`
+interpolates every row from the two nearest, which is softer.
+
+There is a second scaler outside the port: **the GPU's**. `config.txt` sets the
+HDMI mode (`hdmi_mode=16` is 1920x1080), and if the frame buffer (`display` /
+`width=`/`height=` in `cmdline.txt`) is a different size, the firmware stretches
+the whole frame buffer to the HDMI mode with a smoothing filter - a second blur on
+top of whatever the port did. For the sharpest picture, make the two the same:
+
+| Setup | Sharpness | Cost |
+|---|---|---|
+| `display = 1920x1080` with `hdmi_mode=16` | no GPU scaling at all | 2.25x the pixels of 1280x720 for the scaler; fine on core 2 (`video_core = 2`) on a Pi 4 / Pi 5 |
+| `display = 1280x720` with `hdmi_mode=4` (720p) | no GPU scaling; the display scales | the cheapest; how sharp depends on the TV |
+| `display = 1280x720` with `hdmi_mode=16` | GPU stretches x1.5, smoothed | what the card ships with |
+
+The firmware's own filter can also be switched to nearest neighbour with
+`scaling_kernel=8` in `config.txt`: sharp, but at x1.5 every other row is doubled.
+
 ### `mode = auto | performance | powersave`
 
 Parsed and validated, but not applied yet: it would mean overriding the governor,

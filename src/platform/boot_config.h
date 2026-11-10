@@ -140,6 +140,12 @@ struct TBootConfig
 	// ready.  The emulator's speed does not depend on it either way.
 	bool bVsync;
 
+	// How a picture enlarged by a fraction is sampled vertically:
+	//   sharp   area sampling - only the rows on a source boundary mix
+	//           (the default; text keeps its edges)
+	//   smooth  linear interpolation, the port's original look
+	bool bSharpScale;
+
 	// What the file said that could not be used.  ReadBootConfig is a plain
 	// function on purpose (it runs before anything else exists and has no
 	// business touching the kernel), so it cannot call CKernel::Report();
@@ -197,6 +203,7 @@ void ReadBootConfig (TBootConfig *pConfig)
 	strcpy (pConfig->BootLog, "auto");
 	pConfig->nVideoCore = 2;
 	pConfig->bVsync = true;
+	pConfig->bSharpScale = true;
 	pConfig->Warning[0] = '\0';
 
 	FILE *pFile = fopen (BOOT_CONFIG, "r");
@@ -323,6 +330,18 @@ void ReadBootConfig (TBootConfig *pConfig)
 			{
 				BootConfigWarn (pConfig, "boot.conf: unknown vsync \"%s\""
 					" (on|off)", pValue);
+			}
+		}
+		else if (strcmp (pKey, "scaler") == 0)
+		{
+			if (strcmp (pValue, "sharp") == 0 || strcmp (pValue, "smooth") == 0)
+			{
+				pConfig->bSharpScale = strcmp (pValue, "sharp") == 0;
+			}
+			else
+			{
+				BootConfigWarn (pConfig, "boot.conf: unknown scaler \"%s\""
+					" (sharp|smooth)", pValue);
 			}
 		}
 		else if (strcmp (pKey, "mode") == 0)

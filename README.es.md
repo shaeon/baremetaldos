@@ -491,6 +491,30 @@ core 2 los cogiera, el peor tiempo de escalado de ese segundo, y `vs` mientras e
 vsync está activo (`1p` si el firmware sólo dio una página y no hay nada que
 cambiar).
 
+### `scaler = sharp | smooth` y una imagen nítida
+
+`scaler = sharp` (por defecto) amplía la imagen por área en las dos direcciones:
+una fila de pantalla es la fila de origen que tiene debajo, y solo las filas que
+caen en el borde entre dos filas de origen las mezclan, en proporción. `smooth`
+interpola cada fila a partir de las dos más cercanas, que es más suave.
+
+Hay un segundo escalador fuera del port: **el de la GPU**. `config.txt` fija el
+modo HDMI (`hdmi_mode=16` es 1920x1080), y si el framebuffer (`display` /
+`width=`/`height=` en `cmdline.txt`) tiene otro tamaño, el firmware estira el
+framebuffer entero al modo HDMI con un filtro de suavizado: un segundo
+emborronado encima de lo que haya hecho el port. Para la imagen más nítida, que
+coincidan:
+
+| Configuración | Nitidez | Coste |
+|---|---|---|
+| `display = 1920x1080` con `hdmi_mode=16` | sin escalado de la GPU | 2,25 veces los píxeles de 1280x720 para el escalador; asumible en el core 2 (`video_core = 2`) en Pi 4 / Pi 5 |
+| `display = 1280x720` con `hdmi_mode=4` (720p) | sin escalado de la GPU; escala la pantalla | lo más barato; la nitidez depende del televisor |
+| `display = 1280x720` con `hdmi_mode=16` | la GPU estira x1,5 con suavizado | lo que trae la tarjeta |
+
+El filtro del propio firmware también se puede poner a vecino más cercano con
+`scaling_kernel=8` en `config.txt`: nítido, pero a x1,5 una de cada dos filas sale
+doble.
+
 ### `mode = auto | performance | powersave`
 
 Se parsea y se valida, pero todavía no se aplica: hacerlo significaría pisar al
