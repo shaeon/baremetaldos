@@ -454,7 +454,16 @@ boolean CKernel::Initialize (void)
 	// Started once, parked in WFE until something gives them a job
 	// (bare_cores.cpp).  Not having them is not a failed boot: MIDI and the
 	// core 2 presenter are then off and everything runs on core 0 as before.
-	Report ("cores: %s", BareCoresInit () ? "secondary cores parked" : "core 0 only");
+	const boolean bCores = BareCoresInit ();
+	Report ("cores: %s", bCores ? "secondary cores parked" : "core 0 only");
+
+	// --- video presenter on core 2 (boot.conf video_core / vsync) ----------
+	// Only armed here: it starts by itself once the emulator's picture owns
+	// the screen, and falls back to core 0 if core 2 cannot take it.
+	const boolean bCore2Video = Config.nVideoCore == 2 && bCores;
+	BareVideoPresenterConfigure (bCore2Video, Config.bVsync ? TRUE : FALSE);
+	Report ("video: presented by core %u%s", bCore2Video ? 2u : 0u,
+		bCore2Video ? (Config.bVsync ? ", vsync on" : ", vsync off") : "");
 
 	// --- MIDI synthesizers on core 1 ---------------------------------------
 	// Before the core: MIDI_Init() runs inside DOSBox's start-up and needs core
@@ -859,6 +868,38 @@ const char *BuildPanel (void)
 	const char *pGovernor = BareCorePaused () ? "PAUSED"
 						 : BareSysInfoGovernorState ();
 
+	// Where "4 cores" was: with the core 2 presenter running, what it did in
+	// the last second instead - frames flipped, frames replaced before it
+	// could take them, the worst scaling time, and "vs" when vsync is in
+	// force ("1p" when the firmware gave one page only).  The number of
+	// cores never changes, and the panel is one line.
+	char Cores[40];
+	{
+		static u64 s_nLastShown = 0;
+		static u64 s_nLastOverwritten = 0;
+
+		TBareVideoPresenterStats Video;
+		BareVideoPresenterStats (&Video);
+		if (Video.bRunning)
+		{
+			const unsigned nShown = static_cast<unsigned> (Video.nShown - s_nLastShown);
+			const unsigned nOver = static_cast<unsigned> (Video.nOverwritten - s_nLastOverwritten);
+			s_nLastShown = Video.nShown;
+			s_nLastOverwritten = Video.nOverwritten;
+
+			snprintf (Cores, sizeof Cores, "v2 %u/s ov%u %u.%ums%s",
+				  nShown, nOver,
+				  Video.nPeakMicros / 1000, (Video.nPeakMicros % 1000) / 100,
+				  !Video.bTwoPages ? " 1p" : Video.bVsync ? " vs" : "");
+		}
+		else
+		{
+			s_nLastShown = 0;
+			s_nLastOverwritten = 0;
+			snprintf (Cores, sizeof Cores, "%u cores", BareSysInfoCores ());
+		}
+	}
+
 	if (bHasAudio)
 	{
 		// ASCII only, and that is not cosmetic: Circle's built-in font has no
@@ -906,8 +947,8 @@ const char *BuildPanel (void)
 		// and did not fit 1024 - the kind of thing that only shows up on the
 		// board, hence the arithmetic written down.
 		snprintf (Panel, sizeof Panel,
-			  "%s  %u cores  %u MHz  %uC%s  %s%s  fr %uus  %s %u/%u  drop %u",
-			  BareSysInfoBoardName (), BareSysInfoCores (),
+			  "%s  %s  %u MHz  %uC%s  %s%s  fr %uus  %s %u/%u  drop %u",
+			  BareSysInfoBoardName (), Cores,
 			  nArmMHz, nCelsius, pThrottle, pGovernor, Pace,
 			  s_PaceCallMicros,
 			  BareAudioDeviceName (), nFree, nSize, s_PaceDropped);
@@ -915,8 +956,8 @@ const char *BuildPanel (void)
 	else
 	{
 		snprintf (Panel, sizeof Panel,
-			  "%s  %u cores  %u MHz  %uC%s  no audio  %s",
-			  BareSysInfoBoardName (), BareSysInfoCores (),
+			  "%s  %s  %u MHz  %uC%s  no audio  %s",
+			  BareSysInfoBoardName (), Cores,
 			  nArmMHz, nCelsius, pThrottle, Pace);
 	}
 

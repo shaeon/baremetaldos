@@ -143,6 +143,26 @@ static const TCase Cases[] =
 
 static unsigned Errors = 0;
 
+// video_core / vsync (the core 2 presenter), in a table of their own so that
+// the cases above do not all have to spell out two more defaults.
+struct TVideoCase
+{
+	const char *pName;
+	const char *pContents;
+	unsigned    nWantCore;
+	bool        bWantVsync;
+	const char *pWantWarningPart;	// nullptr = no warning expected
+};
+
+static const TVideoCase VideoCases[] =
+{
+	{ "video: sin claves, por defecto 2 + vsync", "display = 1280x720\n", 2, true, nullptr },
+	{ "video: core 0", "video_core = 0\n", 0, true, nullptr },
+	{ "video: core 2 sin vsync", "video_core = 2\nvsync = off\n", 2, false, nullptr },
+	{ "video: valor invalido conserva el defecto", "video_core = 1\n", 2, true, "video_core" },
+	{ "video: vsync invalido conserva el defecto", "vsync = maybe\n", 2, true, "vsync" },
+};
+
 static void Check (bool bOk, const char *pName, const char *pWhat,
 		   const char *pGot = nullptr, const char *pWant = nullptr)
 {
@@ -226,6 +246,33 @@ int main (void)
 		{
 			Check (Config.Warning[0] == '\0', pCase->pName,
 				"sin aviso", Config.Warning, "");
+		}
+	}
+
+	for (const TVideoCase &Case : VideoCases)
+	{
+		FILE *pFile = fopen (BOOT_CONFIG, "w");
+		if (pFile == nullptr)
+		{
+			Errors++;
+			continue;
+		}
+		fputs (Case.pContents, pFile);
+		fclose (pFile);
+
+		TBootConfig Config;
+		ReadBootConfig (&Config);
+
+		Check (Config.nVideoCore == Case.nWantCore, Case.pName, "video_core");
+		Check (Config.bVsync == Case.bWantVsync, Case.pName, "vsync");
+		if (Case.pWantWarningPart != nullptr)
+		{
+			Check (strstr (Config.Warning, Case.pWantWarningPart) != nullptr,
+			       Case.pName, "aviso", Config.Warning, Case.pWantWarningPart);
+		}
+		else
+		{
+			Check (Config.Warning[0] == '\0', Case.pName, "sin aviso", Config.Warning, "");
 		}
 	}
 

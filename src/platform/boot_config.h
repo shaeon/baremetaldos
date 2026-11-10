@@ -124,6 +124,22 @@ struct TBootConfig
 	// card that is finished, not for one being worked on.
 	char BootLog[8];		// "auto", "quiet", "off"
 
+	// Which core puts the picture on the screen while the emulator runs:
+	//
+	//   2  core 2 scales into a hidden page, flips and waits for vsync;
+	//      core 0 only hands the frame over.  The default.
+	//   0  core 0 scales straight into the page on screen, as before -
+	//      for comparing the two, or if core 2 misbehaves on a board.
+	//
+	// If core 2 is not available the port falls back to 0 by itself.
+	unsigned nVideoCore;
+
+	// With video_core = 2: wait for vertical sync after each flip.  On, the
+	// picture never tears (a 70 Hz DOS mode on a 60 Hz display drops about
+	// one frame in seven instead).  Off, core 2 flips as soon as a frame is
+	// ready.  The emulator's speed does not depend on it either way.
+	bool bVsync;
+
 	// What the file said that could not be used.  ReadBootConfig is a plain
 	// function on purpose (it runs before anything else exists and has no
 	// business touching the kernel), so it cannot call CKernel::Report();
@@ -179,6 +195,8 @@ void ReadBootConfig (TBootConfig *pConfig)
 	pConfig->nCPUMaxMHz = 0;
 	strcpy (pConfig->Mode, "auto");
 	strcpy (pConfig->BootLog, "auto");
+	pConfig->nVideoCore = 2;
+	pConfig->bVsync = true;
 	pConfig->Warning[0] = '\0';
 
 	FILE *pFile = fopen (BOOT_CONFIG, "r");
@@ -281,6 +299,30 @@ void ReadBootConfig (TBootConfig *pConfig)
 			{
 				BootConfigWarn (pConfig, "boot.conf: unknown boot_log \"%s\""
 					" (auto|quiet|off)", pValue);
+			}
+		}
+		else if (strcmp (pKey, "video_core") == 0)
+		{
+			if (strcmp (pValue, "0") == 0 || strcmp (pValue, "2") == 0)
+			{
+				pConfig->nVideoCore = static_cast<unsigned> (pValue[0] - '0');
+			}
+			else
+			{
+				BootConfigWarn (pConfig, "boot.conf: unknown video_core \"%s\""
+					" (0|2)", pValue);
+			}
+		}
+		else if (strcmp (pKey, "vsync") == 0)
+		{
+			if (strcmp (pValue, "on") == 0 || strcmp (pValue, "off") == 0)
+			{
+				pConfig->bVsync = strcmp (pValue, "on") == 0;
+			}
+			else
+			{
+				BootConfigWarn (pConfig, "boot.conf: unknown vsync \"%s\""
+					" (on|off)", pValue);
 			}
 		}
 		else if (strcmp (pKey, "mode") == 0)

@@ -455,6 +455,25 @@ en ese orden.
 > se respeta, porque el core parsea el fichero; en `src/platform/bare_coreopts.h`
 > está por qué esos dos caminos difieren.
 
+### `video_core = 2 | 0` y `vsync = on | off`
+
+Qué núcleo pone la imagen en pantalla mientras corre el emulador.
+
+| Valor | Qué pasa |
+|---|---|
+| `video_core = 2` | **por defecto**: el core 2 escala cada frame en una página oculta, cambia a ella y espera el vsync; el core 0 sólo entrega el frame, así que el emulador recupera el tiempo que costaba escalar - se nota sobre todo en una Pi 3 - y la imagen no hace tearing |
+| `video_core = 0` | el core 0 escala directamente en la página visible, como antes: para comparar, o si el core 2 da problemas en alguna placa |
+| `vsync = on` | **por defecto**: sin tearing; un modo de DOS a 70 Hz en una pantalla de 60 Hz pierde a cambio más o menos un frame de cada siete |
+| `vsync = off` | el core 2 cambia de página en cuanto hay un frame listo |
+
+Si el core 2 no está disponible, el port vuelve a 0 por su cuenta. La velocidad de la
+máquina emulada no depende de ninguna de las dos opciones: lleva su propio reloj.
+Mientras presenta el core 2, el panel muestra `v2 72/s ov9 3.2ms vs` donde antes
+decía `4 cores`: frames mostrados por segundo, frames sustituidos antes de que el
+core 2 los cogiera, el peor tiempo de escalado de ese segundo, y `vs` mientras el
+vsync está activo (`1p` si el firmware sólo dio una página y no hay nada que
+cambiar).
+
 ### `mode = auto | performance | powersave`
 
 Se parsea y se valida, pero todavía no se aplica: hacerlo significaría pisar al
@@ -846,13 +865,29 @@ idéntica durante minutos, y un juego repinta algo en segundos. Así que la regl
 espera diez segundos antes de llamar reposo a una pantalla quieta. No es listo, es
 observable, y equivocarse cuesta un nivel durante tres segundos.
 
-### Aquí no se usa más de un núcleo
+### DOSBox sigue en un núcleo; el trabajo de alrededor, no
 
 Circle sólo atiende interrupciones en el core 0, y DOSBox-core no es reentrante: sus
 globales se tocan sin cerrojos. Así que el emulador corre en el core 0, en un solo
-hilo, y `4 cores` en el panel es lo que tiene el SoC, no lo que usa el port. `fr` en
-una pantalla de texto es sobre todo sueño, así que un número alto ahí no es una
-petición de más núcleos.
+hilo, y ahí se queda. `fr` en una pantalla de texto es sobre todo sueño, así que un
+número alto ahí no es una petición de más núcleos.
+
+Lo que se ha movido es el trabajo que no comparte estado con DOSBox
+(`src/platform/bare_cores.cpp` arranca los cores 1-3 una vez y los deja dormidos en
+WFE hasta que reciben una tarea):
+
+| Core | Tarea | Qué cruza al core 0 |
+|---|---|---|
+| 0 | DOSBox, el frontend, las interrupciones | - |
+| 1 | sintetizadores MT-32 / General MIDI (`bare_midi.cpp`) | un anillo de bytes MIDI de entrada y otro de muestras de salida |
+| 2 | presentación de vídeo y el mailbox del firmware (`bare_video.cpp`) | un triple búfer sin bloqueos para los frames; el panel con un seqlock |
+| 3 | libre | |
+
+El core 2 es dueño del mailbox mientras presenta porque esperar el vsync mantiene el
+spinlock del mailbox hasta que llega el vsync: un cambio de reloj o una lectura de
+temperatura desde el core 0 en ese momento pararía la máquina emulada. Así que el
+core 0 encola los cambios de reloj y lee valores publicados
+(`BareSysInfoSetMailboxProxy`).
 
 ### El firmware resta un borde de overscan a tu modo
 
