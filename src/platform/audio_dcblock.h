@@ -42,15 +42,21 @@ public:
 		{
 			for (unsigned c = 0; c < 2; c++)
 			{
-				const float x = pFrames[2 * i + c];
-				const float y = x - m_fX[c] + m_fR * m_fY[c];
-				m_fX[c] = x;
-				m_fY[c] = y;
-
+				const float y = Step (c, pFrames[2 * i + c]);
 				const float s = y > 32767.0f ? 32767.0f : y < -32768.0f ? -32768.0f : y;
 				pFrames[2 * i + c] = static_cast<std::int16_t> (s);
 			}
 		}
+	}
+
+	/// Filter one sample of channel c (0 or 1), no saturation: for callers
+	/// that keep a wider sum and limit it afterwards (see SoftLimit).
+	float Step (unsigned c, float x)
+	{
+		const float y = x - m_fX[c] + m_fR * m_fY[c];
+		m_fX[c] = x;
+		m_fY[c] = y;
+		return y;
 	}
 
 	void Reset (void)
@@ -63,6 +69,31 @@ private:
 	float m_fX[2] = { 0.0f, 0.0f };
 	float m_fY[2] = { 0.0f, 0.0f };
 };
+
+/// Soft limiter for the final sum, in s16 units.  Transparent up to the knee
+/// (75 % of full scale); above it the excess is folded smoothly towards full
+/// scale instead of being cut flat.  A hard clip of a sum - MIDI music on top
+/// of Sound Blaster effects, say - turns every overshoot into a corner, heard
+/// as a harsh, "saturated" edge; this rounds the corner off.  Never exceeds
+/// full scale, so the s16 conversion after it cannot wrap.
+inline float SoftLimit (float x)
+{
+	constexpr float Full = 32767.0f;
+	constexpr float Knee = 0.75f * Full;
+	constexpr float Room = Full - Knee;
+
+	const float a = x < 0.0f ? -x : x;
+	if (a <= Knee)
+	{
+		return x;
+	}
+
+	// Rational approximation of tanh on [0, inf): t / (1 + t), which is 0
+	// at the knee with slope 1 (no audible join) and tends to 1.
+	const float t = (a - Knee) / Room;
+	const float y = Knee + Room * (t / (1.0f + t));
+	return x < 0.0f ? -y : y;
+}
 
 } // namespace bareaudio
 

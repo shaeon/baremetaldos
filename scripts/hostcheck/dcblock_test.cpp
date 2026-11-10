@@ -85,6 +85,29 @@ int main (void)
 		Check (std::fabs (fAfter / fBefore - 1.0) < 0.05, "a 50 Hz bass note passes within 5 %");
 	}
 
+	// The soft limiter: transparent below the knee, never past full scale,
+	// monotonic, and continuous at the knee (no step where it starts).
+	{
+		using bareaudio::SoftLimit;
+		Check (SoftLimit (10000.0f) == 10000.0f && SoftLimit (-20000.0f) == -20000.0f,
+		       "soft limiter: below 75 % of full scale nothing changes");
+		Check (SoftLimit (1e9f) <= 32767.0f && SoftLimit (-1e9f) >= -32767.0f,
+		       "soft limiter: never past full scale, however large the sum");
+		bool bMonotonic = true;
+		for (float x = 0.0f; x < 100000.0f; x += 7.0f)
+			bMonotonic = bMonotonic && SoftLimit (x + 7.0f) >= SoftLimit (x);
+		Check (bMonotonic, "soft limiter: monotonic (a louder input is never quieter)");
+		const float fKnee = 0.75f * 32767.0f;
+		Check (std::fabs (SoftLimit (fKnee + 1.0f) - (fKnee + 1.0f)) < 0.01f,
+		       "soft limiter: continuous with slope 1 at the knee");
+		// MIDI at 0.8 of full scale on top of a Sound Blaster at 0.6: a hard
+		// clip flattens 0.4 of full scale; the limiter keeps it below full
+		// scale and still rising.
+		Check (SoftLimit (1.4f * 32767.0f) < 32767.0f
+		       && SoftLimit (1.4f * 32767.0f) > SoftLimit (1.2f * 32767.0f),
+		       "soft limiter: an overshoot of 40 % is rounded, not cut flat");
+	}
+
 	std::printf ("\n%u failures\n", s_nFailures);
 	return s_nFailures == 0 ? 0 : 1;
 }

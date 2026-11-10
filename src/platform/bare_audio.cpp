@@ -223,17 +223,34 @@ void BareAudioQueue (const s16 *pFrames, unsigned nFrames)
 	// what keeps a PC speaker left on, or a DAC parked at an extreme, from
 	// reaching the HDMI as a constant level.
 	static s16 s_Mixed[2048 * 2];
+	static s16 s_Midi[2048 * 2];
 	static bareaudio::CDCBlocker s_DCBlock (10.0f, static_cast<float> (s_nSampleRate));
 
 	while (nFrames != 0)
 	{
 		const unsigned nChunk = nFrames < 2048 ? nFrames : 2048;
-		memcpy (s_Mixed, pFrames, nChunk * WriteFrameBytes);
-		if (BareMidiActive ())
+
+		// The MIDI from core 1 arrives in a buffer of its own (added onto
+		// silence, so it is a copy), and the sum with DOSBox's output is
+		// made in float: no clipping until the very end, where the soft
+		// limiter rounds the overshoot off instead of cutting it flat.
+		const bool bMidi = BareMidiActive () != FALSE;
+		if (bMidi)
 		{
-			BareMidiMix (s_Mixed, nChunk);
+			memset (s_Midi, 0, nChunk * WriteFrameBytes);
+			BareMidiMix (s_Midi, nChunk);
 		}
-		s_DCBlock.Process (s_Mixed, nChunk);
+
+		for (unsigned i = 0; i < nChunk * 2; i++)
+		{
+			float x = pFrames[i];
+			if (bMidi)
+			{
+				x += s_Midi[i];
+			}
+			x = bareaudio::SoftLimit (s_DCBlock.Step (i & 1, x));
+			s_Mixed[i] = static_cast<s16> (x);
+		}
 
 		size_t nBytes = static_cast<size_t> (nChunk) * WriteFrameBytes;
 

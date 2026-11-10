@@ -384,9 +384,10 @@ public:
 		// 12 % of full scale (measured on the PC with GeneralUser GS); 0.6,
 		// tried on the board, put the music on top of a Sound Blaster / GUS
 		// mix that is already near full scale, and the sum clipped - heard
-		// as a harsh, "saturated" sound.  0.35 keeps the music audible and
-		// leaves headroom for the rest of DOSBox's output.
-		fluid_settings_setnum (m_pSettings, "synth.gain", 0.35);
+		// as a harsh, "saturated" sound.  0.3 keeps the music audible and
+		// leaves headroom for the rest of DOSBox's output; what overshoots
+		// anyway is rounded off by the soft limiter in bare_audio.cpp.
+		fluid_settings_setnum (m_pSettings, "synth.gain", 0.3);
 #if RASPPI <= 3
 		fluid_settings_setint (m_pSettings, "synth.polyphony", 64);
 #else
