@@ -1490,6 +1490,12 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 	// "flushing the card" and then going quiet is what left a user watching a
 	// frozen screen and guessing; the wording below says what is happening now
 	// and, crucially, which of the two possible endings each line is.
+	// Core 0 takes the screen back from the core 2 presenter before the
+	// shutdown lines: from here on the emulator produces no frames, and the
+	// teardown below must not race a core that is flipping pages and owns
+	// the mailbox.  A no-op when the presenter is not running.
+	BareVideoPresenterStop ();
+
 	BareVideoFooterSetVisible (TRUE);
 	BareVideoFooter (0, "shutting down: stopping the emulator, do NOT cut power yet");
 

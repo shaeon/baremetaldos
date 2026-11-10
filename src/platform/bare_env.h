@@ -310,6 +310,10 @@ u64     BareAudioDroppedSamples (void);
 ///\t   is not available; core 0 then keeps presenting as before.
 boolean BareVideoPresenterStart (boolean bVsync);
 
+/// \brief From boot.conf: start the presenter by itself once the emulator's
+///\t   picture owns the screen (first frames drawn, boot text gone).
+void    BareVideoPresenterConfigure (boolean bEnable, boolean bVsync);
+
 /// \brief Take presentation back to core 0 (before anything else draws on
 ///\t   the screen, e.g. at shutdown).  Waits for core 2 to stop; leaves the
 ///\t   last picture on page 0.

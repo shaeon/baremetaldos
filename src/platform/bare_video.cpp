@@ -204,6 +204,54 @@ unsigned s_nMirrorHeight = 0;
 bareframe::CFrameExchange s_Frames;		// core 0 -> core 2
 std::atomic<bool> s_bPresenterOn {false};	// core 0 publishes instead of drawing
 
+// Configured from boot.conf (BareVideoPresenterConfigure); the presenter
+// starts by itself once the emulator's picture owns the screen.
+bool s_bPresenterWanted = false;
+bool s_bPresenterWantVsync = true;
+
+// Requests from core 0 to core 2.
+std::atomic<bool> s_bRepaintRequest {false};	// re-present the current frame
+std::atomic<bool> s_bHoldRequest {false};	// stop flipping (screenshot)
+std::atomic<bool> s_bHeld {false};		// core 2: holding, page stable
+std::atomic<unsigned> s_nShownPage {0};		// page core 2 scans out now
+
+// --- the line slots as shared state --------------------------------------
+//
+// With the presenter on, core 0 keeps updating s_Slots (text and rectangle)
+// but does not draw them; core 2 draws them into every page it flips to.  A
+// sequence lock keeps core 2 from copying a slot half written: core 0 makes
+// the sequence odd while it writes, core 2 copies and retries if the
+// sequence was odd or moved.  Core 0 never waits for core 2.
+std::atomic<unsigned> s_nOverlaySeq {0};
+unsigned s_nOverlayWriteDepth = 0;		// core 0 only: nested writers
+
+struct TOverlayWrite
+{
+	TOverlayWrite (void)
+	{
+		if (s_nOverlayWriteDepth++ == 0)
+		{
+			s_nOverlaySeq.store (s_nOverlaySeq.load (std::memory_order_relaxed) + 1,
+					     std::memory_order_relaxed);
+			std::atomic_thread_fence (std::memory_order_release);
+		}
+	}
+
+	~TOverlayWrite (void)
+	{
+		if (--s_nOverlayWriteDepth == 0)
+		{
+			s_nOverlaySeq.store (s_nOverlaySeq.load (std::memory_order_relaxed) + 1,
+					     std::memory_order_release);
+		}
+	}
+};
+
+inline bool CoreZeroDraws (void)
+{
+	return !s_bPresenterOn.load (std::memory_order_acquire);
+}
+
 
 u32 *FrameBufferWords (void)
 {
@@ -867,6 +915,19 @@ void BareVideoPresent (const u32 *pPixels, unsigned nWidth, unsigned nHeight,
 		return;
 	}
 
+	// Hand the screen to core 2 once the emulator's picture owns it: the boot
+	// text is gone (status off) and the margins were wiped behind the first
+	// frames (s_nWipeAfterPresents back to 0).  From here on core 0 draws
+	// nothing while the presenter runs.
+	if (s_bPresenterWanted && !s_bPresenterOn.load (std::memory_order_relaxed)
+	    && !s_bStatusEnabled && s_nWipeAfterPresents == 0 && s_nPresentedSinceStart >= 2)
+	{
+		if (!BareVideoPresenterStart (s_bPresenterWantVsync ? TRUE : FALSE))
+		{
+			s_bPresenterWanted = false;	// do not retry every frame
+		}
+	}
+
 	// With the core 2 presenter running, core 0 only hands the frame over:
 	// one copy into the triple buffer (which replaces the mirror copy below,
 	// so it costs no more than before) and the sampled hash for the
@@ -1229,6 +1290,13 @@ void BareVideoSetSourceAspect (unsigned nAspectX, unsigned nAspectY)
 
 void BareVideoRepaint (void)
 {
+	if (!CoreZeroDraws ())
+	{
+		s_bRepaintRequest.store (true, std::memory_order_release);
+		BareCoresWake ();
+		return;
+	}
+
 	// The present path only recomputes what is visible; see the mirror above.
 	// This is what makes a skipped present still erase a line, and what makes
 	// a line change not leave the old one behind: the source frame is still
@@ -1440,6 +1508,11 @@ void BareVideoFill (u32 nColor)
 		return;
 	}
 
+	// A full-screen paint from core 0 (the stall report, a new boot log) is
+	// core 0 taking the screen back: the presenter stops first and leaves
+	// page 0 scanned out.
+	BareVideoPresenterStop ();
+
 	// The *whole* buffer, virtual size included: both pages.
 	//
 	// This used to say "Both pages" and then fill s_nModeWidth x s_nModeHeight at
@@ -1596,11 +1669,48 @@ boolean BareVideoScreenshot (void)
 
 		boolean bOk = fwrite (Header, 1, sizeof Header, pFile) == sizeof Header;
 
-		const u32 nPitch = s_pFrameBuffer->GetPitch () / 4;
+		u32 nPitch = s_pFrameBuffer->GetPitch () / 4;
 		const u32 *pDst = FrameBufferWords ();
+
+		// With the presenter on, the page on screen changes under us 60
+		// times a second.  Ask core 2 to hold (it stops flipping and acks),
+		// copy the page it shows into RAM, and let it go again before the
+		// slow part - the card write - so that the picture freezes for the
+		// few milliseconds of the copy only.
+		u32 *pCopy = nullptr;
+		if (!CoreZeroDraws ())
+		{
+			s_bHoldRequest.store (true, std::memory_order_release);
+			BareCoresWake ();
+			for (unsigned nWait = 0; nWait < 200 && !s_bHeld.load (std::memory_order_acquire); nWait++)
+			{
+				CTimer::SimpleMsDelay (1);
+			}
+
+			pCopy = new u32[static_cast<size_t> (s_nModeWidth) * s_nModeHeight];
+			if (pCopy != nullptr && s_bHeld.load (std::memory_order_acquire))
+			{
+				const u32 *pPage = FrameBufferWords ()
+					+ static_cast<uintptr_t> (s_nShownPage.load (std::memory_order_acquire))
+					  * s_nModeHeight * nPitch;
+				for (unsigned nY = 0; nY < s_nModeHeight; nY++)
+				{
+					memcpy (pCopy + static_cast<size_t> (nY) * s_nModeWidth,
+						pPage + static_cast<size_t> (nY) * nPitch,
+						s_nModeWidth * sizeof (u32));
+				}
+				pDst = pCopy;
+				nPitch = s_nModeWidth;
+			}
+
+			s_bHoldRequest.store (false, std::memory_order_release);
+			BareCoresWake ();
+		}
+
 		u8 *pRow = new u8[nRowBytes];
 		if (pRow == nullptr)
 		{
+			delete[] pCopy;
 			fclose (pFile);
 			return FALSE;
 		}
@@ -1626,6 +1736,7 @@ boolean BareVideoScreenshot (void)
 		}
 
 		delete[] pRow;
+		delete[] pCopy;
 		fclose (pFile);
 
 		if (bOk)
@@ -1640,6 +1751,7 @@ boolean BareVideoScreenshot (void)
 
 void BareVideoFooterSetVisible (boolean bVisible)
 {
+	TOverlayWrite Guard;
 	const boolean bWas = s_bFooterVisible;
 
 	if (bWas == bVisible)
@@ -1730,9 +1842,14 @@ static void ClearSlot (unsigned nSlot)
 		return;
 	}
 
-	const u32 nPitch = s_pFrameBuffer->GetPitch () / 4;
-	FillRect (FrameBufferWords (), nPitch, Slot.nX, Slot.nY,
-		  Slot.nWidth, Slot.nHeight, 0x00000000);
+	TOverlayWrite Guard;
+
+	if (CoreZeroDraws ())
+	{
+		const u32 nPitch = s_pFrameBuffer->GetPitch () / 4;
+		FillRect (FrameBufferWords (), nPitch, Slot.nX, Slot.nY,
+			  Slot.nWidth, Slot.nHeight, 0x00000000);
+	}
 
 	Slot.Text[0] = '\0';
 }
@@ -1764,7 +1881,7 @@ void DrawSlot (unsigned nSlot)
 	TLineSlot &Slot = s_Slots[nSlot];
 
 	// Nothing was ever drawn here, or it was erased: nothing to draw.
-	if (Slot.nWidth == 0 || Slot.Text[0] == '\0')
+	if (Slot.nWidth == 0 || Slot.Text[0] == '\0' || !CoreZeroDraws ())
 	{
 		return;
 	}
@@ -1798,6 +1915,9 @@ void BareVideoLine (unsigned nSlot, const char *pText)
 	// *does* return early.  Erasing it goes through
 	// DrawSlot(), which is where the note above explains why that one must not
 	// return early.
+	TOverlayWrite Guard;
+	const bool bDraw = CoreZeroDraws ();
+
 	if (nSlot == 0 && !s_bFooterVisible)
 	{
 		BareVideoNoteHiddenPanelText (pText);
@@ -1871,7 +1991,7 @@ void BareVideoLine (unsigned nSlot, const char *pText)
 	// Erase before drawing: the text changes width every second (the drop
 	// counter grows), and without this the tail of the previous longer line
 	// would stay behind.
-	if (Slot.nWidth != 0)
+	if (Slot.nWidth != 0 && bDraw)
 	{
 		FillRect (pDst, nPitch, Slot.nX, Slot.nY,
 			  Slot.nWidth, Slot.nHeight, 0x00000000);
@@ -1888,8 +2008,11 @@ void BareVideoLine (unsigned nSlot, const char *pText)
 	memcpy (Slot.Text, pText, nChars);
 	Slot.Text[nChars] = '\0';
 
-	FillRect (pDst, nPitch, nX, nY, nWidth, nLineHeight, 0x00000000);
-	DrawText (pDst, nPitch, nX + PanelMargin, nY + 1, Slot.Text, 0x00FFFFFF);
+	if (bDraw)
+	{
+		FillRect (pDst, nPitch, nX, nY, nWidth, nLineHeight, 0x00000000);
+		DrawText (pDst, nPitch, nX + PanelMargin, nY + 1, Slot.Text, 0x00FFFFFF);
+	}
 
 	Slot.nX = nX;
 	Slot.nY = nY;
@@ -2038,6 +2161,66 @@ void ClearOutsidePage (unsigned nPage)
 		  s_nDstHeight, 0x00000000);
 }
 
+// The slots as core 2 last copied them (sequence lock, see TOverlayWrite).
+struct TOverlaySnapshot
+{
+	TLineSlot Slots[MaxSlots];
+	boolean bFooterVisible;
+};
+
+bool TakeOverlay (TOverlaySnapshot &Snap, unsigned &nSeq)
+{
+	for (unsigned nTry = 0; nTry < 8; nTry++)
+	{
+		const unsigned nBefore = s_nOverlaySeq.load (std::memory_order_acquire);
+		if (nBefore & 1)
+		{
+			continue;		// core 0 is writing; it takes microseconds
+		}
+
+		memcpy (Snap.Slots, s_Slots, sizeof Snap.Slots);
+		Snap.bFooterVisible = s_bFooterVisible;
+		std::atomic_thread_fence (std::memory_order_acquire);
+
+		if (s_nOverlaySeq.load (std::memory_order_relaxed) == nBefore)
+		{
+			nSeq = nBefore;
+			return true;
+		}
+	}
+
+	return false;			// try again on the next pass
+}
+
+// The slot strip at the bottom of one page: cleared, then every slot with
+// text drawn the way DrawSlot() draws it.  The picture never reaches this
+// strip (ComputeDestination reserves it), so what is drawn here stays until
+// the next overlay change or a margin clear of that page.
+void DrawOverlayPage (unsigned nPage, const TOverlaySnapshot &Snap)
+{
+	const u32 nPitch = s_pFrameBuffer->GetPitch () / 4;
+	u32 *pDst = PageWords (nPage);
+
+	const unsigned nLineHeight = s_Font.GetCharHeight () + 2;
+	const unsigned nStrip = nLineHeight * MaxSlots;
+	if (nStrip < s_nModeHeight)
+	{
+		FillRect (pDst, nPitch, 0, s_nModeHeight - nStrip, s_nModeWidth, nStrip, 0x00000000);
+	}
+
+	for (unsigned nSlot = 0; nSlot < MaxSlots; nSlot++)
+	{
+		const TLineSlot &Slot = Snap.Slots[nSlot];
+		if (Slot.nWidth == 0 || Slot.Text[0] == '\0' || (nSlot == 0 && !Snap.bFooterVisible))
+		{
+			continue;
+		}
+
+		FillRect (pDst, nPitch, Slot.nX, Slot.nY, Slot.nWidth, Slot.nHeight, 0x00000000);
+		DrawText (pDst, nPitch, Slot.nX + PanelMargin, Slot.nY + 1, Slot.Text, 0x00FFFFFF);
+	}
+}
+
 void PresenterLoop (void)
 {
 	EnableEventStream ();
@@ -2047,15 +2230,19 @@ void PresenterLoop (void)
 
 	// Start on page 0, which is what the display shows now.
 	s_nFrontPage = 0;
+	s_nShownPage.store (0, std::memory_order_release);
 	if (bTwoPages)
 	{
 		(void) s_pFrameBuffer->SetVirtualOffset (0, 0);
 	}
 
-	// The destination rectangle each page was last cleared for.  A page
-	// whose margins are stale (first use, or the source size changed) is
-	// cleared before the picture is drawn into it.
+	// Per page: the picture rectangle its margins were cleared for, and the
+	// overlay sequence drawn into it (~0 = nothing valid drawn).
 	unsigned nClearedFor[2][4] = {};
+	unsigned nOverlayDrawn[2] = { ~0u, ~0u };
+
+	TOverlaySnapshot Overlay;
+	unsigned nOverlaySeq = ~0u;
 
 	bool bVsyncWorks = true;
 	s_bPresenterRunning.store (true, std::memory_order_release);
@@ -2064,9 +2251,50 @@ void PresenterLoop (void)
 	{
 		BareSysInfoServiceTick ();
 
+		// --- hold (screenshot): keep the page on screen stable ----------
+		if (s_bHoldRequest.load (std::memory_order_acquire))
+		{
+			s_bHeld.store (true, std::memory_order_release);
+			while (s_bHoldRequest.load (std::memory_order_acquire)
+			       && !s_bPresenterStop.load (std::memory_order_acquire))
+			{
+				BareSysInfoServiceTick ();
+				WaitForEvent ();
+			}
+			s_bHeld.store (false, std::memory_order_release);
+			continue;
+		}
+
+		// --- overlay: take a new copy of the slots if core 0 changed them --
+		const unsigned nSeqNow = s_nOverlaySeq.load (std::memory_order_acquire);
+		if (nSeqNow != nOverlaySeq && (nSeqNow & 1) == 0)
+		{
+			unsigned nTaken;
+			if (TakeOverlay (Overlay, nTaken))
+			{
+				nOverlaySeq = nTaken;
+			}
+		}
+
+		// --- the frame: a new one, or the current one on a repaint request -
 		const bareframe::TFrame *pFrame = s_Frames.Acquire ();
+		if (pFrame == nullptr && s_bRepaintRequest.exchange (false, std::memory_order_acq_rel))
+		{
+			pFrame = s_Frames.Current ();
+		}
+
 		if (pFrame == nullptr || pFrame->pPixels == nullptr)
 		{
+			// Nothing to flip.  A panel change still has to reach the
+			// screen: draw it straight into the page on show - it is the
+			// strip below the picture, which the display reads as text
+			// appearing, not as a torn picture.
+			if (nOverlaySeq != ~0u && nOverlayDrawn[s_nFrontPage] != nOverlaySeq)
+			{
+				DrawOverlayPage (s_nFrontPage, Overlay);
+				nOverlayDrawn[s_nFrontPage] = nOverlaySeq;
+			}
+
 			WaitForEvent ();
 			continue;
 		}
@@ -2078,12 +2306,19 @@ void PresenterLoop (void)
 		const unsigned Rect[4] = { s_nDstX, s_nDstY, s_nDstWidth, s_nDstHeight };
 		if (memcmp (nClearedFor[nBack], Rect, sizeof Rect) != 0)
 		{
-			ClearOutsidePage (nBack);
+			ClearOutsidePage (nBack);	// also wipes the slot strip
 			memcpy (nClearedFor[nBack], Rect, sizeof Rect);
+			nOverlayDrawn[nBack] = ~0u;
 		}
 
 		PresentVisibleTo (PageWords (nBack), pFrame->pPixels, pFrame->nWidth,
 				  pFrame->nHeight, pFrame->nWidth * sizeof (u32));
+
+		if (nOverlaySeq != ~0u && nOverlayDrawn[nBack] != nOverlaySeq)
+		{
+			DrawOverlayPage (nBack, Overlay);
+			nOverlayDrawn[nBack] = nOverlaySeq;
+		}
 
 		const unsigned nMicros = static_cast<unsigned> (BareMicros () - nStart);
 		s_nPresenterLastMicros.store (nMicros, std::memory_order_relaxed);
@@ -2100,6 +2335,7 @@ void PresenterLoop (void)
 			if (s_pFrameBuffer->SetVirtualOffset (0, nBack * s_nModeHeight))
 			{
 				s_nFrontPage = nBack;
+				s_nShownPage.store (nBack, std::memory_order_release);
 			}
 		}
 
@@ -2115,20 +2351,29 @@ void PresenterLoop (void)
 	}
 
 	// Leave the screen the way core 0 expects to find it: the latest picture
-	// on page 0, page 0 scanned out.  Core 0 draws into page 0 only.
+	// and the panel on page 0, page 0 scanned out.  Core 0 draws into page 0
+	// only.
 	const bareframe::TFrame *pLast = s_Frames.Current ();
-	if (pLast != nullptr && pLast->pPixels != nullptr && s_nFrontPage != 0)
+	if (s_nFrontPage != 0)
 	{
-		ComputeDestination (pLast->nWidth, pLast->nHeight);
-		ClearOutsidePage (0);
-		PresentVisibleTo (PageWords (0), pLast->pPixels, pLast->nWidth,
-				  pLast->nHeight, pLast->nWidth * sizeof (u32));
+		if (pLast != nullptr && pLast->pPixels != nullptr)
+		{
+			ComputeDestination (pLast->nWidth, pLast->nHeight);
+			ClearOutsidePage (0);
+			PresentVisibleTo (PageWords (0), pLast->pPixels, pLast->nWidth,
+					  pLast->nHeight, pLast->nWidth * sizeof (u32));
+		}
+		if (nOverlaySeq != ~0u)
+		{
+			DrawOverlayPage (0, Overlay);
+		}
 	}
 	if (bTwoPages)
 	{
 		(void) s_pFrameBuffer->SetVirtualOffset (0, 0);
 	}
 	s_nFrontPage = 0;
+	s_nShownPage.store (0, std::memory_order_release);
 
 	s_bPresenterRunning.store (false, std::memory_order_release);
 	// Returning parks core 2 again (bare_cores.cpp); it can be restarted.
@@ -2171,12 +2416,22 @@ boolean BareVideoPresenterStart (boolean bVsync)
 	return TRUE;
 }
 
+void BareVideoPresenterConfigure (boolean bEnable, boolean bVsync)
+{
+	s_bPresenterWanted = bEnable != FALSE;
+	s_bPresenterWantVsync = bVsync != FALSE;
+}
+
 void BareVideoPresenterStop (void)
 {
 	if (!s_bPresenterOn.load (std::memory_order_acquire))
 	{
 		return;
 	}
+
+	// Once core 0 has taken the screen back from a running presenter (stall
+	// report, shutdown), it keeps it: no automatic restart on the next frame.
+	s_bPresenterWanted = false;
 
 	// Core 0 stops publishing first, so that nothing new arrives while core
 	// 2 winds down; then core 2 is asked to stop and waited for.
