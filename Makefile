@@ -1314,6 +1314,15 @@ check-midi:
 		-o build/midi_test scripts/hostcheck/midi_test.cpp
 	@build/midi_test
 
+# The core 0 -> core 2 frame hand-over (frame_exchange.h): a lock-free triple
+# buffer.  Two host threads; a torn or out-of-order frame fails it.
+.PHONY: check-frames
+check-frames:
+	@mkdir -p build
+	@$(HOST_CXX) -std=gnu++23 -O1 -Wall -Wextra -Wpedantic -Wshadow -pthread \
+		-o build/frame_exchange_test scripts/hostcheck/frame_exchange_test.cpp
+	@build/frame_exchange_test
+
 # The flush sequence (bare_storage.h), against a fake FatFs.  This target exists
 # because .59 did not link: kernel.cpp called POSIX sync(), which circle-stdlib
 # does not provide, and nothing before the cross build could have noticed.  What
@@ -1372,7 +1381,7 @@ check-dynarec-hook:
 # config parser.  This is the target to run before a cross build.
 check-host: check-platform check-kernel check-bootconf check-scaling check-dynarec \
             check-coreopts check-resample check-storage check-governor check-portorder \
-            check-dynarec-hook check-midi
+            check-dynarec-hook check-midi check-frames
 print-srcs:
 	@echo $(ALL_SRCS)
 
