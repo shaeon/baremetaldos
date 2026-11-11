@@ -1315,6 +1315,15 @@ check-midi:
 		-o build/midi_test scripts/hostcheck/midi_test.cpp
 	@build/midi_test
 
+# Changing one value in boot.conf / dosbox.conf / cmdline.txt without
+# touching anything else (conf_edit.h), including the files in sd/.
+.PHONY: check-conf
+check-conf:
+	@mkdir -p build
+	@$(HOST_CXX) -std=gnu++23 -O1 -Wall -Wextra -Wpedantic -Wshadow \
+		-o build/conf_edit_test scripts/hostcheck/conf_edit_test.cpp
+	@build/conf_edit_test sd
+
 # The setup menu's model and layout (menu_model.h): pages, cursor, keys, and
 # the 80x30 grid.
 .PHONY: check-menu
@@ -1408,7 +1417,7 @@ check-dynarec-hook:
 # config parser.  This is the target to run before a cross build.
 check-host: check-platform check-kernel check-bootconf check-scaling check-dynarec \
             check-coreopts check-resample check-storage check-governor check-portorder \
-            check-dynarec-hook check-midi check-frames check-audio check-scale check-menu
+            check-dynarec-hook check-midi check-frames check-audio check-scale check-menu check-conf
 print-srcs:
 	@echo $(ALL_SRCS)
 

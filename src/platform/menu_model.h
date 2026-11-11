@@ -30,6 +30,7 @@
 #ifndef BARE_MENU_MODEL_H
 #define BARE_MENU_MODEL_H
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -172,6 +173,7 @@ struct TItem
 	int nId = 0;				// for the caller: which action / setting
 	std::vector<std::string> Choices;
 	unsigned nChoice = 0;
+	bool bModified = false;			// differs from the file: shown with '*'
 };
 
 struct TPage
@@ -187,13 +189,25 @@ enum class TKey
 	Enter, Escape, Plus, Minus, F1, F9, F10
 };
 
-enum class TEventKind { None, Close, Action, Changed, SaveAndExit, Defaults };
+enum class TEventKind { None, Close, Action, Changed, SaveAndExit, Defaults, Dialog };
 
 struct TEvent
 {
 	TEventKind Kind = TEventKind::None;
-	int nId = 0;			// Action / Changed: the item's id
-	unsigned nChoice = 0;		// Changed: the new choice
+	int nId = 0;			// Action / Changed / Dialog: the item's or dialog's id
+	unsigned nChoice = 0;		// Changed: the new choice; Dialog: the option
+	bool bCancelled = false;	// Dialog: closed with Esc
+};
+
+// A question in a box over the page, as a BIOS asks "Save to CMOS and EXIT
+// (Y/N)?".  While one is open it gets every key.
+struct TDialog
+{
+	int nId = 0;
+	std::string Title;
+	std::string Text;
+	std::vector<std::string> Options;
+	unsigned nSel = 0;
 };
 
 struct TTexts
@@ -220,6 +234,15 @@ public:
 
 	unsigned CurrentPage (void) const { return m_nPage; }
 
+	void OpenDialog (int nId, const std::string &Title, const std::string &Text,
+			 const std::vector<std::string> &Options, unsigned nDefault = 0)
+	{
+		m_Dialog = TDialog { nId, Title, Text, Options, nDefault < Options.size () ? nDefault : 0 };
+		m_bDialog = !Options.empty ();
+	}
+
+	bool DialogOpen (void) const { return m_bDialog; }
+
 	/// Selected item of the current page, or -1 when it has none selectable.
 	int Selected (void) const
 	{
@@ -240,6 +263,30 @@ public:
 	TEvent Key (TKey Key)
 	{
 		TEvent Ev;
+
+		if (m_bDialog)
+		{
+			const unsigned n = static_cast<unsigned> (m_Dialog.Options.size ());
+			switch (Key)
+			{
+			case TKey::Left: case TKey::Up: case TKey::Minus:
+				m_Dialog.nSel = (m_Dialog.nSel + n - 1) % n; break;
+			case TKey::Right: case TKey::Down: case TKey::Plus:
+				m_Dialog.nSel = (m_Dialog.nSel + 1) % n; break;
+			case TKey::Enter:
+				m_bDialog = false;
+				Ev.Kind = TEventKind::Dialog; Ev.nId = m_Dialog.nId; Ev.nChoice = m_Dialog.nSel;
+				break;
+			case TKey::Escape:
+				m_bDialog = false;
+				Ev.Kind = TEventKind::Dialog; Ev.nId = m_Dialog.nId; Ev.bCancelled = true;
+				break;
+			default:
+				break;
+			}
+			return Ev;
+		}
+
 		if (Pages.empty ()) return Ev;
 
 		switch (Key)
@@ -342,6 +389,11 @@ public:
 		S.Fill (0, BodyTop + BodyRows, Cols, Rows - BodyTop - BodyRows, White, Blue);
 		S.Put (1, BodyTop + BodyRows + 1, Texts.KeysLine1, White, Blue);
 		S.Put (1, BodyTop + BodyRows + 2, Texts.KeysLine2, White, Blue);
+
+		if (m_bDialog)
+		{
+			RenderDialog (S);
+		}
 	}
 
 	/// Word wrap into a box; returns rows used.
@@ -378,6 +430,60 @@ public:
 private:
 	unsigned m_nPage = 0;
 	unsigned m_nSel = 0;
+	TDialog m_Dialog;
+	bool m_bDialog = false;
+
+	void RenderDialog (CScreen &S) const
+	{
+		// Options on one line: "  Guardar    Descartar    Seguir  ".
+		std::string OptLine;
+		std::vector<unsigned> OptX;
+		for (const std::string &O : m_Dialog.Options)
+		{
+			OptLine += "  ";
+			OptX.push_back (CScreen::Length (OptLine));
+			OptLine += " " + O + " ";
+		}
+		const unsigned nOptW = CScreen::Length (OptLine) + 2;
+
+		const unsigned w = std::max<unsigned> (44, std::min<unsigned> (64, nOptW + 4));
+		CScreen Probe;
+		const unsigned nTextRows = Wrap (Probe, 0, 0, w - 4, Rows, m_Dialog.Text);
+		const unsigned h = nTextRows + 6;
+		const unsigned x = (Cols - w) / 2;
+		const unsigned y = (Rows - h) / 2;
+
+		S.Fill (x + 1, y + 1, w, h, Black, Black);		// shadow
+		S.Fill (x, y, w, h, White, Red);
+		S.HLine (x, y, w);
+		S.HLine (x, y + h - 1, w);
+		S.VLine (x, y, h);
+		S.VLine (x + w - 1, y, h);
+
+		const std::string Title = " " + m_Dialog.Title + " ";
+		S.Put (x + (w - CScreen::Length (Title)) / 2, y, Title, Yellow, Red);
+
+		// The text, wrapped, in the box's colours.
+		CScreen T;
+		Wrap (T, 0, 0, w - 4, nTextRows, m_Dialog.Text);
+		for (unsigned r = 0; r < nTextRows; r++)
+			for (unsigned c = 0; c < w - 4; c++)
+				if (T.At (c, r).nChar != ' ')
+				{
+					std::string One;
+					CScreen::Encode (One, T.At (c, r).nChar);
+					S.Put (x + 2 + c, y + 2 + r, One, White, Red);
+				}
+
+		const unsigned ox = x + (w - CScreen::Length (OptLine)) / 2;
+		const unsigned oy = y + h - 3;
+		for (size_t i = 0; i < m_Dialog.Options.size (); i++)
+		{
+			const bool bSel = i == m_Dialog.nSel;
+			S.Put (ox + OptX[i], oy, " " + m_Dialog.Options[i] + " ",
+			       bSel ? Red : White, bSel ? White : Red);
+		}
+	}
 
 	static bool Selectable (const TItem &Item)
 	{
@@ -472,6 +578,10 @@ private:
 			S.Put (ValueCol, y, Value, bSelected ? Yellow : Blue, nBg, ApplyCol - ValueCol - 1);
 
 			S.Put (ApplyCol, y, ApplyMark (Item.Apply), bSelected ? LightCyan : DarkGrey, nBg);
+			if (Item.bModified)
+			{
+				S.Put (ApplyCol + 1, y, "*", bSelected ? Yellow : Red, nBg);
+			}
 			return;
 		}
 		}

@@ -24,6 +24,7 @@
 #include "bare_env.h"
 #include "menu_model.h"
 #include "menu_render.h"
+#include "conf_edit.h"
 
 #include <circle/font.h>
 #include <circle/logger.h>
@@ -81,7 +82,334 @@ enum TActionId
 	ActResume = 1,
 	ActShutdown,
 	ActReboot,
+	ActSave,
+	ActSaveRestart,
+	ActDiscard,
+	ActDefaults,
 };
+
+enum TDialogId
+{
+	DlgUnsaved = 1,		// Esc with changes: Guardar / Descartar / Seguir
+	DlgDefaults,		// F9: Sí / No
+	DlgRestartNow,		// after saving B settings: Reiniciar ahora / Más tarde
+	DlgSaveFailed,		// Aceptar
+};
+
+// --- settings: what the menu can change, and where it is kept ------------------------
+//
+// Each setting is one value in one file.  The menu reads the files when it
+// opens (so a file edited on the PC is what it shows), keeps the choice made
+// in the menu apart from the one in the file, and writes only what changed,
+// in place, through conf_edit.h.  A setting that applies at once has a
+// function to apply it; leaving without saving puts the file's value back.
+
+enum TFile { FileBoot, FileDOSBox, FileCmdline };
+
+const char *const BootPath = "SD:/boot.conf";
+const char *const DOSBoxPath = "SD:/dosbox/dosbox.conf";
+const char *const CmdlinePath = "SD:/cmdline.txt";
+
+struct TChoice
+{
+	std::string Label;		// what the menu shows
+	std::string Value;		// what the file holds
+};
+
+struct TSetting
+{
+	int nId;
+	TFile File;
+	const char *pSection;		// "" for boot.conf
+	const char *pKey;		// for the display mode: see SaveDisplay
+	const char *pLabel;
+	const char *pHelp;
+	TApply Apply;
+	std::vector<TChoice> Choices;
+	unsigned nDefault;
+	void (*pLive) (const std::string &Value);	// applied at once, or nullptr
+
+	unsigned nSaved = 0;		// the value in the file
+	unsigned nPending = 0;		// the value in the menu
+};
+
+enum TSettingId
+{
+	SetDisplay = 100,
+	SetVideoCore,
+	SetVsync,
+	SetScaler,
+};
+
+void LiveScaler (const std::string &Value)
+{
+	BareVideoSetSharpScaling (Value == "sharp" ? TRUE : FALSE);
+}
+
+std::vector<TSetting> s_Settings;
+
+void DefineSettings (void)
+{
+	s_Settings.clear ();
+
+	s_Settings.push_back ({ SetDisplay, FileCmdline, "", "width/height", "Resolución",
+		"El tamaño del framebuffer. Para la imagen más nítida, que coincida con el modo "
+		"HDMI de config.txt (hdmi_mode=16 es 1920x1080, hdmi_mode=4 es 1280x720): si no, "
+		"la GPU vuelve a escalar con suavizado. 800x600 alivia una Pi 3. Se guarda en "
+		"cmdline.txt, que es el que manda, y en boot.conf.",
+		TApply::RestartBoard,
+		{ { "640x480", "640x480" }, { "800x600", "800x600" }, { "1024x768", "1024x768" },
+		  { "1280x720", "1280x720" }, { "1280x1024", "1280x1024" }, { "1920x1080", "1920x1080" } },
+		3, nullptr });
+
+	s_Settings.push_back ({ SetVideoCore, FileBoot, "", "video_core", "Núcleo de vídeo",
+		"Núcleo 2: escala la imagen en otro núcleo, en una página oculta, y la muestra "
+		"con vsync; el emulador recupera ese tiempo. Núcleo 0: como al principio, en el "
+		"mismo núcleo que DOSBox. Para comparar o si el 2 da problemas en alguna placa.",
+		TApply::RestartBoard,
+		{ { "Núcleo 2", "2" }, { "Núcleo 0", "0" } }, 0, nullptr });
+
+	s_Settings.push_back ({ SetVsync, FileBoot, "", "vsync", "Vsync",
+		"Con el núcleo 2: esperar al refresco de la pantalla tras cada cambio de página. "
+		"Sí: sin tearing (un modo de 70 Hz en una pantalla de 60 Hz pierde un frame de "
+		"cada siete). No: se muestra en cuanto está listo. La velocidad del juego no "
+		"depende de esto.",
+		TApply::RestartBoard,
+		{ { "Sí", "on" }, { "No", "off" } }, 0, nullptr });
+
+	s_Settings.push_back ({ SetScaler, FileBoot, "", "scaler", "Escalado",
+		"Nítido: cada fila de pantalla es la fila del juego que tiene debajo, y solo "
+		"mezclan las del borde entre dos; el texto conserva los bordes. Suave: cada fila "
+		"se interpola de las dos más cercanas. Se ve al momento, en este mismo menú.",
+		TApply::Now,
+		{ { "Nítido", "sharp" }, { "Suave", "smooth" } }, 0, LiveScaler });
+}
+
+TSetting *FindSetting (int nId)
+{
+	for (TSetting &S : s_Settings)
+	{
+		if (S.nId == nId) return &S;
+	}
+	return nullptr;
+}
+
+bool ReadText (const char *pPath, std::string *pText)
+{
+	pText->clear ();
+	FILE *pFile = fopen (pPath, "rb");
+	if (pFile == nullptr)
+	{
+		return false;
+	}
+	char Buffer[512];
+	size_t n;
+	while ((n = fread (Buffer, 1, sizeof Buffer, pFile)) != 0)
+	{
+		pText->append (Buffer, n);
+	}
+	fclose (pFile);
+	return true;
+}
+
+// Write next to the file and swap: a cut in the middle leaves either the old
+// file or the new one, plus a stray ".new" - never half a file.
+bool WriteText (const char *pPath, const std::string &Text)
+{
+	const std::string Tmp = std::string (pPath) + ".new";
+	FILE *pFile = fopen (Tmp.c_str (), "wb");
+	if (pFile == nullptr)
+	{
+		return false;
+	}
+	const bool bWritten = fwrite (Text.data (), 1, Text.size (), pFile) == Text.size ();
+	const bool bClosed = fclose (pFile) == 0;	// f_close: f_sync to the card
+	if (!bWritten || !bClosed)
+	{
+		remove (Tmp.c_str ());
+		return false;
+	}
+	remove (pPath);
+	return rename (Tmp.c_str (), pPath) == 0;
+}
+
+unsigned IndexOf (const TSetting &S, const std::string &Value)
+{
+	for (unsigned i = 0; i < S.Choices.size (); i++)
+	{
+		if (S.Choices[i].Value == Value) return i;
+	}
+	return S.nDefault;
+}
+
+void LoadSettings (void)
+{
+	std::string Boot, DOSBox, Cmdline;
+	ReadText (BootPath, &Boot);
+	ReadText (DOSBoxPath, &DOSBox);
+	ReadText (CmdlinePath, &Cmdline);
+	const bareconf::CConfText BootConf (Boot, true);
+	const bareconf::CConfText DOSBoxConf (DOSBox, false);
+
+	for (TSetting &S : s_Settings)
+	{
+		std::string Value;
+		bool bFound = false;
+
+		if (S.nId == SetDisplay)
+		{
+			// cmdline.txt's width= / height= is what the console and the port
+			// use; a mode not in the list is added to it, so that the menu
+			// shows what the card really has.
+			std::string W, H;
+			if (bareconf::CmdlineGet (Cmdline, "width", &W) && bareconf::CmdlineGet (Cmdline, "height", &H))
+			{
+				Value = W + "x" + H;
+				bFound = true;
+				bool bKnown = false;
+				for (const TChoice &C : S.Choices) bKnown = bKnown || C.Value == Value;
+				if (!bKnown) S.Choices.insert (S.Choices.begin (), TChoice { Value, Value });
+			}
+		}
+		else if (S.File == FileBoot)
+		{
+			bFound = BootConf.Get (S.pSection, S.pKey, &Value);
+		}
+		else if (S.File == FileDOSBox)
+		{
+			bFound = DOSBoxConf.Get (S.pSection, S.pKey, &Value);
+		}
+
+		S.nSaved = bFound ? IndexOf (S, bareconf::Lower (bareconf::Trim (Value))) : S.nDefault;
+		S.nPending = S.nSaved;
+	}
+}
+
+bool AnyModified (void)
+{
+	for (const TSetting &S : s_Settings)
+	{
+		if (S.nPending != S.nSaved) return true;
+	}
+	return false;
+}
+
+bool ModifiedNeedsBoard (void)
+{
+	for (const TSetting &S : s_Settings)
+	{
+		if (S.nPending != S.nSaved && S.Apply == TApply::RestartBoard) return true;
+	}
+	return false;
+}
+
+void SetPending (TSetting &S, unsigned nChoice)
+{
+	S.nPending = nChoice;
+	if (S.pLive != nullptr)
+	{
+		S.pLive (S.Choices[nChoice].Value);
+	}
+}
+
+void Discard (void)
+{
+	for (TSetting &S : s_Settings)
+	{
+		if (S.nPending != S.nSaved)
+		{
+			SetPending (S, S.nSaved);
+		}
+	}
+}
+
+void LoadDefaults (void)
+{
+	for (TSetting &S : s_Settings)
+	{
+		if (S.nPending != S.nDefault && S.nDefault < S.Choices.size ())
+		{
+			SetPending (S, S.nDefault);
+		}
+	}
+}
+
+/// Write every changed setting to its file.  FALSE if a file could not be
+/// written; the settings that were written count as saved either way.
+bool SaveSettings (void)
+{
+	bool bOk = true;
+	bool bBoot = false, bDOSBox = false, bCmdline = false;
+	for (const TSetting &S : s_Settings)
+	{
+		if (S.nPending == S.nSaved) continue;
+		if (S.nId == SetDisplay) { bCmdline = true; bBoot = true; }
+		else if (S.File == FileBoot) bBoot = true;
+		else if (S.File == FileDOSBox) bDOSBox = true;
+	}
+
+	if (bCmdline)
+	{
+		const TSetting *pDisplay = FindSetting (SetDisplay);
+		std::string Text;
+		ReadText (CmdlinePath, &Text);
+		const std::string &Mode = pDisplay->Choices[pDisplay->nPending].Value;
+		const size_t x = Mode.find ('x');
+		Text = bareconf::CmdlineSet (Text, "width", Mode.substr (0, x));
+		Text = bareconf::CmdlineSet (Text, "height", Mode.substr (x + 1));
+		bOk = WriteText (CmdlinePath, Text) && bOk;
+	}
+
+	if (bBoot)
+	{
+		std::string Text;
+		ReadText (BootPath, &Text);
+		bareconf::CConfText Conf (Text, true);
+		for (const TSetting &S : s_Settings)
+		{
+			if (S.nPending == S.nSaved) continue;
+			if (S.nId == SetDisplay) Conf.Set ("", "display", S.Choices[S.nPending].Value);
+			else if (S.File == FileBoot) Conf.Set (S.pSection, S.pKey, S.Choices[S.nPending].Value);
+		}
+		bOk = WriteText (BootPath, Conf.Text ()) && bOk;
+	}
+
+	if (bDOSBox)
+	{
+		std::string Text;
+		ReadText (DOSBoxPath, &Text);
+		bareconf::CConfText Conf (Text, false);
+		for (const TSetting &S : s_Settings)
+		{
+			if (S.nPending != S.nSaved && S.File == FileDOSBox)
+				Conf.Set (S.pSection, S.pKey, S.Choices[S.nPending].Value);
+		}
+		bOk = WriteText (DOSBoxPath, Conf.Text ()) && bOk;
+	}
+
+	for (TSetting &S : s_Settings)
+	{
+		S.nSaved = S.nPending;
+	}
+
+	CLogger::Get ()->Write (FromMenu, bOk ? LogNotice : LogError,
+				bOk ? "settings saved" : "settings: a file could not be written");
+	return bOk;
+}
+
+TItem SettingItem (const TSetting &S)
+{
+	TItem Item;
+	Item.Kind = TKind::Choice;
+	Item.Label = S.pLabel;
+	Item.Help = S.pHelp;
+	Item.Apply = S.Apply;
+	Item.nId = S.nId;
+	for (const TChoice &C : S.Choices) Item.Choices.push_back (C.Label);
+	Item.nChoice = S.nPending;
+	Item.bModified = S.nPending != S.nSaved;
+	return Item;
+}
 
 // --- texts -----------------------------------------------------------------
 
@@ -232,10 +560,16 @@ TPage PageSalir (void)
 		Action ("Reiniciar la placa", ActReboot,
 			"Reinicia la Raspberry Pi, como Ctrl+Alt+PetSis."),
 		Section (""),
-		Planned ("Guardar y volver", "Guardará los cambios en boot.conf y dosbox.conf."),
-		Planned ("Guardar y reiniciar", "Guarda y reinicia DOSBox, para los ajustes marcados R.", TApply::RestartDOSBox),
-		Planned ("Salir sin guardar", "Descarta los cambios hechos en el menú."),
-		Planned ("Valores por defecto", "Vuelve a los valores de fábrica (F9)."),
+		Action ("Guardar y volver", ActSave,
+			"Guarda los cambios en boot.conf, dosbox.conf y cmdline.txt (solo las líneas "
+			"que cambian; los comentarios se conservan) y vuelve al juego. Igual que F10."),
+		Action ("Guardar y reiniciar", ActSaveRestart,
+			"Guarda y reinicia la placa, para que se apliquen los ajustes marcados B."),
+		Action ("Salir sin guardar", ActDiscard,
+			"Descarta los cambios hechos en el menú, deshace los que se aplicaron al "
+			"momento y vuelve al juego."),
+		Action ("Valores por defecto", ActDefaults,
+			"Pone los valores de fábrica en el menú (F9). No se guardan hasta que guardes."),
 		Planned ("Actualizar desde GitHub", "Buscará una versión nueva en las releases."),
 	};
 	return P;
@@ -282,15 +616,23 @@ void BuildPages (void)
 		{ "Probar sonido", TApply::Now },
 	}));
 
-	Pages.push_back (PagePlanned ("Vídeo", "Resolución, presentación y escalado.",
 	{
-		{ "Resolución", TApply::RestartBoard },
-		{ "Núcleo de vídeo", TApply::RestartBoard },
-		{ "Vsync", TApply::RestartBoard },
-		{ "Escalado", TApply::Now },
-		{ "Corrección de aspecto", TApply::Now },
-		{ "Panel de estado", TApply::Now },
-	}));
+		TPage P;
+		P.Title = "Vídeo";
+		P.Help = "Resolución, presentación y escalado.";
+		P.Items =
+		{
+			Section ("Pantalla"),
+			SettingItem (*FindSetting (SetDisplay)),
+			Section ("Presentación"),
+			SettingItem (*FindSetting (SetVideoCore)),
+			SettingItem (*FindSetting (SetVsync)),
+			SettingItem (*FindSetting (SetScaler)),
+			Planned ("Corrección de aspecto", "Llegará en un paso próximo del menú."),
+			Planned ("Panel de estado", "Llegará en un paso próximo del menú."),
+		};
+		Pages.push_back (P);
+	}
 
 	Pages.push_back (PagePlanned ("Entrada", "Teclado, ratón, joystick y mandos.",
 	{
@@ -384,28 +726,114 @@ bool Repeats (TKey Key)
 	       || Key == TKey::Plus || Key == TKey::Minus;
 }
 
+void Close (void)
+{
+	s_bClosing = true;
+}
+
+void AskToLeave (void)
+{
+	if (!AnyModified ())
+	{
+		Close ();
+		return;
+	}
+	s_Menu.OpenDialog (DlgUnsaved, "Cambios sin guardar",
+			   "Has cambiado ajustes en el menú. ¿Qué hacemos con ellos?",
+			   { "Guardar", "Descartar", "Seguir aquí" });
+}
+
+void SaveAndLeave (bool bRestartBoard)
+{
+	const bool bBoard = ModifiedNeedsBoard ();
+	if (AnyModified () && !SaveSettings ())
+	{
+		s_Menu.OpenDialog (DlgSaveFailed, "No se pudo guardar",
+				   "No se pudo escribir algún fichero en la tarjeta (¿protegida "
+				   "contra escritura o llena?). Lo que sí se escribió queda guardado.",
+				   { "Aceptar" });
+		return;
+	}
+
+	if (bRestartBoard)
+	{
+		BareCoreRequestReboot ();
+		return;
+	}
+
+	if (bBoard)
+	{
+		s_Menu.OpenDialog (DlgRestartNow, "Reinicio necesario",
+				   "Guardado. Los ajustes marcados B se aplican al reiniciar la placa.",
+				   { "Reiniciar ahora", "Más tarde" });
+		return;
+	}
+
+	Close ();
+}
+
 void HandleEvent (const TEvent &Ev)
 {
 	switch (Ev.Kind)
 	{
 	case TEventKind::Close:
-	case TEventKind::SaveAndExit:		// nothing to save yet
-		s_bClosing = true;
+		AskToLeave ();
+		break;
+
+	case TEventKind::SaveAndExit:
+		SaveAndLeave (false);
+		break;
+
+	case TEventKind::Defaults:
+		s_Menu.OpenDialog (DlgDefaults, "Valores por defecto",
+				   "¿Poner todos los ajustes del menú en sus valores de fábrica? "
+				   "No se guardan hasta que guardes.", { "Sí", "No" }, 1);
+		break;
+
+	case TEventKind::Changed:
+		if (TSetting *pSetting = FindSetting (Ev.nId))
+		{
+			SetPending (*pSetting, Ev.nChoice);
+		}
 		break;
 
 	case TEventKind::Action:
-		if (Ev.nId == ActResume)
+		switch (Ev.nId)
 		{
-			s_bClosing = true;
-		}
-		else if (Ev.nId == ActShutdown)
-		{
-			s_bClosing = true;
+		case ActResume:		AskToLeave (); break;
+		case ActSave:		SaveAndLeave (false); break;
+		case ActSaveRestart:	SaveAndLeave (true); break;
+		case ActDiscard:	Discard (); Close (); break;
+		case ActDefaults:	HandleEvent (TEvent { TEventKind::Defaults }); break;
+		case ActShutdown:
+			// Changes not saved are dropped, as a power-off without saving
+			// would; the shutdown itself is what was asked for.
+			Discard ();
+			Close ();
 			BareCoreRequestShutdown ();
-		}
-		else if (Ev.nId == ActReboot)
-		{
+			break;
+		case ActReboot:
 			BareCoreRequestReboot ();
+			break;
+		default:
+			break;
+		}
+		break;
+
+	case TEventKind::Dialog:
+		if (Ev.nId == DlgUnsaved && !Ev.bCancelled)
+		{
+			if (Ev.nChoice == 0) SaveAndLeave (false);
+			else if (Ev.nChoice == 1) { Discard (); Close (); }
+		}
+		else if (Ev.nId == DlgDefaults && !Ev.bCancelled && Ev.nChoice == 0)
+		{
+			LoadDefaults ();
+		}
+		else if (Ev.nId == DlgRestartNow)
+		{
+			if (!Ev.bCancelled && Ev.nChoice == 0) BareCoreRequestReboot ();
+			else Close ();
 		}
 		break;
 
@@ -414,9 +842,16 @@ void HandleEvent (const TEvent &Ev)
 	}
 }
 
+void UpdateTitle (void)
+{
+	s_Menu.Texts.Title = AnyModified () ? "BM-DOS Setup   * cambios sin guardar" : "BM-DOS Setup";
+}
+
 void Press (TKey Key)
 {
 	HandleEvent (s_Menu.Key (Key));
+	BuildPages ();		// values and '*' marks follow the change
+	UpdateTitle ();
 	s_bDirty = true;
 }
 
@@ -491,7 +926,10 @@ void BareMenuTick (void)
 		BareCoreReleaseAllKeys ();
 		BareVideoSaveScreen ();
 		SetupTexts ();
+		DefineSettings ();
+		LoadSettings ();
 		BuildPages ();
+		UpdateTitle ();
 		s_nLastRefresh = nNow;
 		s_bDirty = true;
 		CLogger::Get ()->Write (FromMenu, LogNotice, "setup menu open");

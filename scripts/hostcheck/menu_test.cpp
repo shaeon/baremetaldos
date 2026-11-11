@@ -121,6 +121,32 @@ int main (void)
 		Check (CScreen::Length (T.Texts.Title) < Cols, "title fits");
 	}
 
+	std::printf ("dialog\n");
+	{
+		CMenu D;
+		TPage P; P.Title = "Salir"; P.Items = { Action ("Volver al juego", 1) };
+		D.Pages = { P }; D.Refresh ();
+		D.OpenDialog (7, "Cambios sin guardar", "¿Guardar los cambios antes de volver al juego?",
+			      { "Guardar", "Descartar", "Seguir" });
+		Check (D.DialogOpen (), "a dialog opens");
+		Check (D.Key (TKey::Down).Kind == TEventKind::None, "arrow keys move inside the dialog, no event");
+		TEvent Ev = D.Key (TKey::Enter);
+		Check (Ev.Kind == TEventKind::Dialog && Ev.nId == 7 && Ev.nChoice == 1 && !Ev.bCancelled && !D.DialogOpen (),
+		       "Enter answers with the option chosen and closes it");
+		D.OpenDialog (8, "T", "x", { "Sí", "No" }, 1);
+		Ev = D.Key (TKey::Escape);
+		Check (Ev.Kind == TEventKind::Dialog && Ev.nId == 8 && Ev.bCancelled, "Esc cancels the dialog, not the menu");
+		D.OpenDialog (9, "Cambios sin guardar", "¿Guardar?", { "Guardar", "Descartar" });
+		CScreen T; D.Render (T);
+		bool bTitle = false, bOpt = false;
+		for (unsigned y = 0; y < Rows; y++)
+		{
+			bTitle = bTitle || Contains (T.RowText (y), " Cambios sin guardar ");
+			bOpt = bOpt || (Contains (T.RowText (y), " Guardar ") && Contains (T.RowText (y), " Descartar "));
+		}
+		Check (bTitle && bOpt, "the dialog is drawn over the page with its title and options");
+	}
+
 	std::printf ("scrolling and wrapping\n");
 	{
 		CMenu L;
