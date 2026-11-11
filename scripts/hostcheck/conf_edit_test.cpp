@@ -133,6 +133,23 @@ int main (int argc, char **argv)
 		       "a missing command goes after the last non-blank line of [autoexec]");
 	}
 
+	std::printf ("[autoexec] block of the menu\n");
+	{
+		const std::string Orig = "[autoexec]\nMOUNT C /dos\nC:\nKEYB es 850\n";
+		CConfText C (Orig, false);
+		Check (GetBlock (C).empty (), "no block: nothing to read");
+		SetBlock (C, { "C:", "CD \\DOOM", "DOOM.EXE" });
+		const std::string With = C.Text ();
+		Check (With == std::string ("[autoexec]\nMOUNT C /dos\nC:\nKEYB es 850\n") + BlockBegin + "\nC:\nCD \\DOOM\nDOOM.EXE\n" + BlockEnd + "\n",
+		       "the block goes at the end of [autoexec], between markers");
+		Check (GetBlock (C) == std::vector<std::string> ({ "C:", "CD \\DOOM", "DOOM.EXE" }), "and reads back");
+		SetBlock (C, { "C:", "TYRIAN.EXE" });
+		Check (GetBlock (C) == std::vector<std::string> ({ "C:", "TYRIAN.EXE" }) && C.Text ().find ("DOOM") == std::string::npos,
+		       "a new game replaces the block in place");
+		SetBlock (C, {});
+		Check (C.Text () == Orig, "an empty block removes it, markers too: the file is as before");
+	}
+
 	std::printf ("cmdline.txt\n");
 	{
 		const std::string Orig = "loglevel=4 logdev=tty1 keymap=es width=1280 height=720 socmaxtemp=80\n";

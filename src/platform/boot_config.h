@@ -161,6 +161,10 @@ struct TBootConfig
 	// movement before DOSBox sees it.
 	unsigned nMouseSpeed;
 
+	// Seconds the boot waits for SUPR / F2 (the setup menu before DOSBox
+	// starts), 0-5; 0 = no wait (Win+F12 still opens it later).
+	unsigned nSetupWait;
+
 	// What the file said that could not be used.  ReadBootConfig is a plain
 	// function on purpose (it runs before anything else exists and has no
 	// business touching the kernel), so it cannot call CKernel::Report();
@@ -223,6 +227,7 @@ void ReadBootConfig (TBootConfig *pConfig)
 	pConfig->nVolume = 100;
 	pConfig->nMidiVolume = 100;
 	pConfig->nMouseSpeed = 100;
+	pConfig->nSetupWait = 2;
 	pConfig->Warning[0] = '\0';
 
 	FILE *pFile = fopen (BOOT_CONFIG, "r");
@@ -361,6 +366,19 @@ void ReadBootConfig (TBootConfig *pConfig)
 			{
 				BootConfigWarn (pConfig, "boot.conf: unknown audio_out \"%s\""
 					" (hdmi|jack)", pValue);
+			}
+		}
+		else if (strcmp (pKey, "setup_wait") == 0)
+		{
+			char *pEnd = nullptr;
+			const unsigned long n = strtoul (pValue, &pEnd, 10);
+			if (pEnd == pValue || *pEnd != '\0' || n > 5)
+			{
+				BootConfigWarn (pConfig, "boot.conf: setup_wait \"%s\" is not 0-5", pValue);
+			}
+			else
+			{
+				pConfig->nSetupWait = static_cast<unsigned> (n);
 			}
 		}
 		else if (strcmp (pKey, "mouse_speed") == 0)

@@ -30,6 +30,7 @@
 #include <circle/logger.h>
 #include <circle/memory.h>
 #include <circle/sched/scheduler.h>
+#include <circle/timer.h>
 
 #include <atomic>
 #include <cstdarg>
@@ -100,6 +101,8 @@ enum TActionId
 	ActFloppyEject,
 	ActCD,
 	ActCDEject,
+	ActBootGame,
+	ActBootPrompt,
 	ActBrowseUp,
 	ActBrowsePick,			// "elegir esta carpeta"
 	ActBrowseEntry = 10000,		// + index into the listing
@@ -123,12 +126,22 @@ struct TFolderDrive
 TFolderDrive s_DriveC { 'C', "/dos", "", "" };
 TFolderDrive s_DriveE { 'E', "", "", "" };
 
+// What runs at boot: a program on C:, as its DOS path from C:'s root
+// ("DOOM\\DOOM.EXE"), or "" for the C:\\> prompt.  Kept as the menu's own
+// block at the end of [autoexec] (conf_edit.h GetBlock / SetBlock), R.
+std::string s_BootSaved;
+std::string s_BootPending;
+
+// SUPR / F2 at boot: the window in which they open the menu (BareMenuBootWindow).
+std::atomic<bool> s_bBootWindow {false};
+bool s_bOpenedAtBoot = false;
+
 std::string s_FloppyImage;		// what this menu put in A: / D:, for display
 std::string s_CDImage;
 
 // --- the card browser ------------------------------------------------------------
 
-enum class TBrowse { None, FolderC, FolderE, Floppy, CD };
+enum class TBrowse { None, FolderC, FolderE, Floppy, CD, Game };
 
 TBrowse s_Browse = TBrowse::None;
 std::string s_BrowsePath = "/";
@@ -232,6 +245,9 @@ enum TSettingId
 	SetCPUMax = 500,
 	SetGovMode,
 	SetSocMaxTemp,			// cmdline.txt socmaxtemp=
+
+	SetBootLog = 600,
+	SetSetupWait,
 };
 
 void LiveScaler (const std::string &Value)
@@ -605,6 +621,22 @@ void DefineSettings (void)
 		  { "80 °C", "80" }, { "85 °C", "85" } },
 		4, nullptr });
 
+	// --- Arranque -------------------------------------------------------------
+
+	s_Settings.push_back ({ SetBootLog, FileBoot, "", "boot_log", "Mensajes de arranque",
+		"Lo que se ve mientras arranca. Todo: cada paso, lo que hace falta para "
+		"diagnosticar. Resumen: solo lo importante. Nada: pantalla negra hasta DOS.",
+		TApply::RestartBoard,
+		{ { "Todo", "auto" }, { "Resumen", "quiet" }, { "Nada", "off" } }, 0, nullptr });
+
+	s_Settings.push_back ({ SetSetupWait, FileBoot, "", "setup_wait", "Espera de SUPR",
+		"Los segundos que espera el arranque a que pulses SUPR o F2 para entrar aquí "
+		"antes de que arranque DOSBox. Sin espera: Win+F12 sigue abriendo el menú "
+		"después.",
+		TApply::RestartBoard,
+		{ { "Sin espera", "0" }, { "1 s", "1" }, { "2 s", "2" }, { "3 s", "3" }, { "5 s", "5" } },
+		2, nullptr });
+
 	// The default SoundFont: default.sf2 if the card has it.
 	if (TSetting *pFont = FindSetting (SetSoundFont))
 	{
@@ -683,6 +715,25 @@ void LoadSettings (void)
 
 	s_DriveC.Saved = s_DriveC.Pending = bareconf::GetMount (DOSBoxConf, 'C');
 	s_DriveE.Saved = s_DriveE.Pending = bareconf::GetMount (DOSBoxConf, 'E');
+
+	// The boot program from the menu's block: "CD \DIR" + "PROG.EXE".
+	{
+		std::string Dir, Prog;
+		for (const std::string &L : bareconf::GetBlock (DOSBoxConf))
+		{
+			const std::vector<std::string> W = bareconf::Words (L);
+			if (W.size () >= 2 && bareconf::Lower (W[0]) == "cd")
+			{
+				Dir = W[1];
+				while (!Dir.empty () && Dir[0] == '\\') Dir.erase (0, 1);
+			}
+			else if (W.size () == 1 && W[0].find (':') == std::string::npos)
+			{
+				Prog = W[0];
+			}
+		}
+		s_BootSaved = s_BootPending = Prog.empty () ? "" : (Dir.empty () ? Prog : Dir + "\\" + Prog);
+	}
 
 	for (TSetting &S : s_Settings)
 	{
@@ -787,7 +838,8 @@ bool AnyModified (void)
 	{
 		if (S.nPending != S.nSaved) return true;
 	}
-	return s_DriveC.Pending != s_DriveC.Saved || s_DriveE.Pending != s_DriveE.Saved;
+	return s_DriveC.Pending != s_DriveC.Saved || s_DriveE.Pending != s_DriveE.Saved
+	       || s_BootPending != s_BootSaved;
 }
 
 bool ModifiedNeedsBoard (void)
@@ -801,8 +853,9 @@ bool ModifiedNeedsBoard (void)
 		if (S.nPending != S.nSaved
 		    && (S.Apply == TApply::RestartBoard || S.Apply == TApply::RestartDOSBox)) return true;
 	}
-	// The drives are R too.
-	return s_DriveC.Pending != s_DriveC.Saved || s_DriveE.Pending != s_DriveE.Saved;
+	// The drives and the boot program are R too.
+	return s_DriveC.Pending != s_DriveC.Saved || s_DriveE.Pending != s_DriveE.Saved
+	       || s_BootPending != s_BootSaved;
 }
 
 void SetPending (TSetting &S, unsigned nChoice)
@@ -818,6 +871,7 @@ void Discard (void)
 {
 	s_DriveC.Pending = s_DriveC.Saved;
 	s_DriveE.Pending = s_DriveE.Saved;
+	s_BootPending = s_BootSaved;
 
 	for (TSetting &S : s_Settings)
 	{
@@ -832,6 +886,7 @@ void LoadDefaults (void)
 {
 	s_DriveC.Pending = s_DriveC.Default;
 	s_DriveE.Pending = s_DriveE.Default;
+	s_BootPending.clear ();
 
 	for (TSetting &S : s_Settings)
 	{
@@ -856,7 +911,8 @@ bool SaveSettings (void)
 		else if (S.File == FileBoot) bBoot = true;
 		else if (S.File == FileDOSBox) bDOSBox = true;
 	}
-	if (s_DriveC.Pending != s_DriveC.Saved || s_DriveE.Pending != s_DriveE.Saved)
+	if (s_DriveC.Pending != s_DriveC.Saved || s_DriveE.Pending != s_DriveE.Saved
+	    || s_BootPending != s_BootSaved)
 	{
 		bDOSBox = true;
 	}
@@ -934,6 +990,21 @@ bool SaveSettings (void)
 			}
 		}
 
+		// What runs at boot: the menu's block at the end of [autoexec].
+		if (s_BootPending != s_BootSaved)
+		{
+			std::vector<std::string> Lines;
+			if (!s_BootPending.empty ())
+			{
+				const size_t n = s_BootPending.find_last_of ('\\');
+				Lines.push_back ("C:");
+				Lines.push_back (n == std::string::npos ? "CD \\"
+					       : "CD \\" + s_BootPending.substr (0, n));
+				Lines.push_back (n == std::string::npos ? s_BootPending : s_BootPending.substr (n + 1));
+			}
+			bareconf::SetBlock (Conf, Lines);
+		}
+
 		// midiconfig: the SoundFont for General MIDI, the model for MT-32;
 		// left alone with no device (it may hold something set by hand).
 		{
@@ -962,6 +1033,7 @@ bool SaveSettings (void)
 	}
 	s_DriveC.Saved = s_DriveC.Pending;
 	s_DriveE.Saved = s_DriveE.Pending;
+	s_BootSaved = s_BootPending;
 
 	CLogger::Get ()->Write (FromMenu, bOk ? LogNotice : LogError,
 				bOk ? "settings saved" : "settings: a file could not be written");
@@ -1158,6 +1230,7 @@ bool BrowseWants (const std::string &Name, bool bFolder)
 	{
 	case TBrowse::Floppy:	return Ends (".img");		// what the core's disk control mounts in A:
 	case TBrowse::CD:	return Ends (".iso") || Ends (".cue");
+	case TBrowse::Game:	return Ends (".exe") || Ends (".com") || Ends (".bat");
 	default:		return false;			// folder modes list folders only
 	}
 }
@@ -1226,6 +1299,7 @@ TPage PageBrowser (void)
 	P.Title = s_Browse == TBrowse::FolderC ? "Elegir carpeta para C:"
 		: s_Browse == TBrowse::FolderE ? "Elegir carpeta para E:"
 		: s_Browse == TBrowse::Floppy ? "Elegir disquete (.img) para A:"
+		: s_Browse == TBrowse::Game ? "Elegir el programa de arranque (en C:)"
 		: "Elegir CD (.iso / .cue) para D:";
 	P.Help = "Intro abre una carpeta. Esc vuelve sin elegir nada.";
 
@@ -1245,11 +1319,15 @@ TPage PageBrowser (void)
 		P.Items.push_back (Action (E.second ? E.first + "/" : E.first,
 					   ActBrowseEntry + static_cast<int> (i),
 					   E.second ? "Intro: entrar en la carpeta."
-						    : "Intro: meter esta imagen en la unidad, al momento."));
+						    : s_Browse == TBrowse::Game
+						      ? "Intro: arrancar este programa al encender."
+						      : "Intro: meter esta imagen en la unidad, al momento."));
 	}
 	if (s_BrowseEntries.empty ())
 	{
-		P.Items.push_back (Info (bFolders ? "(no hay carpetas)" : "(no hay imágenes aquí)", ""));
+		P.Items.push_back (Info (bFolders ? "(no hay carpetas)"
+					 : s_Browse == TBrowse::Game ? "(no hay programas aquí)"
+					 : "(no hay imágenes aquí)", ""));
 	}
 	return P;
 }
@@ -1470,12 +1548,34 @@ void BuildPages (void)
 		{ "Servidor web de la tarjeta", TApply::RestartBoard },
 	}));
 
-	Pages.push_back (PagePlanned ("Arranque", "Qué pasa al encender.",
 	{
-		{ "Al arrancar", TApply::RestartDOSBox },
-		{ "Mensajes de arranque", TApply::RestartBoard },
-		{ "Espera de SUPR", TApply::RestartBoard },
-	}));
+		TPage P;
+		P.Title = "Arranque";
+		P.Help = "Qué pasa al encender.";
+
+		TItem Game = Action ("Al arrancar", ActBootGame,
+			"Intro: elegir un programa de C: (.EXE, .COM o .BAT) que arranque solo al "
+			"encender, en su carpeta. Se guarda al final del [autoexec] de dosbox.conf, "
+			"entre dos comentarios del menú; lo demás del autoexec no se toca.");
+		Game.Value = s_BootPending.empty () ? "Prompt de DOS (C:\\>)" : s_BootPending;
+		Game.Apply = TApply::RestartDOSBox;
+		Game.bModified = s_BootPending != s_BootSaved;
+
+		P.Items = { Section ("DOS"), Game };
+		if (!s_BootPending.empty ())
+		{
+			TItem Prompt = Action ("Volver al prompt", ActBootPrompt,
+				"Que el arranque se quede en C:\\> sin lanzar nada.");
+			Prompt.Apply = TApply::RestartDOSBox;
+			P.Items.push_back (Prompt);
+		}
+		P.Items.push_back (Planned ("Lanzador de juegos", "Llegará en un paso próximo: una lista "
+			"de los juegos de C: para elegir al encender."));
+		P.Items.push_back (Section ("La placa"));
+		P.Items.push_back (SettingItem (*FindSetting (SetBootLog)));
+		P.Items.push_back (SettingItem (*FindSetting (SetSetupWait)));
+		Pages.push_back (P);
+	}
 
 	Pages.push_back (PageSalir ());
 
@@ -1590,11 +1690,14 @@ void BrowseStart (TBrowse Mode, const std::string &Start)
 	s_Menu.GoToPage (0);
 }
 
+constexpr unsigned PageIndexArranque = 8;	// ..., Red, Arranque, Salir
+
 void BrowseClose (void)
 {
+	const bool bGame = s_Browse == TBrowse::Game;
 	s_Browse = TBrowse::None;
 	BuildPages ();
-	s_Menu.GoToPage (PageIndexUnidades);
+	s_Menu.GoToPage (bGame ? PageIndexArranque : PageIndexUnidades);
 }
 
 void Insert (const std::string &Path, bool bFloppy)
@@ -1638,6 +1741,29 @@ void HandleBrowse (int nId)
 		BrowseRead ();
 		BuildPages ();
 		s_Menu.GoToPage (0);
+		return;
+	}
+
+	if (s_Browse == TBrowse::Game)
+	{
+		// From the card's path to the DOS path under C: ("/dos/DOOM/DOOM.EXE"
+		// with C: at /dos -> "DOOM\\DOOM.EXE").  A program outside C:'s folder
+		// is not on any drive at boot.
+		const std::string Path = BrowseJoin (Entry.first);
+		const std::string Root = s_DriveC.Pending.empty () ? "/dos" : s_DriveC.Pending;
+		const std::string Prefix = Root == "/" ? "/" : Root + "/";
+		BrowseClose ();
+		if (Path.rfind (Prefix, 0) != 0)
+		{
+			s_Menu.OpenDialog (DlgSaveFailed, "Fuera de C:",
+					   Format ("Ese programa no está dentro de %s, que es C:. Elige uno "
+						   "de esa carpeta, o cambia C: primero.", Root.c_str ()),
+					   { "Aceptar" });
+			return;
+		}
+		std::string Dos = Path.substr (Prefix.size ());
+		for (char &c : Dos) if (c == '/') c = '\\';
+		s_BootPending = Dos;
 		return;
 	}
 
@@ -1697,6 +1823,15 @@ void HandleEvent (const TEvent &Ev)
 			break;
 		case ActDriveE:
 			BrowseStart (TBrowse::FolderE, s_DriveE.Pending.empty () ? "/" : s_DriveE.Pending);
+			break;
+		case ActBootGame:
+		{
+			std::string Start = s_DriveC.Pending.empty () ? "/dos" : s_DriveC.Pending;
+			BrowseStart (TBrowse::Game, Start);
+			break;
+		}
+		case ActBootPrompt:
+			s_BootPending.clear ();
 			break;
 		case ActDriveERemove:
 			s_DriveE.Pending.clear ();
@@ -1859,8 +1994,11 @@ boolean BareMenuKey (unsigned nRetroKey, boolean bDown, boolean bWinDown)
 {
 	if (!s_bActive.load (std::memory_order_acquire))
 	{
-		// Win+F12 opens it.  Everything else goes to DOS as before.
-		if (nRetroKey == RETROK_F12 && bDown && bWinDown)
+		// Win+F12 opens it - and, while the boot waits for it, SUPR or F2.
+		// Everything else goes to DOS as before.
+		const bool bBootKey = s_bBootWindow.load (std::memory_order_acquire) && bDown
+				      && (nRetroKey == RETROK_DELETE || nRetroKey == RETROK_F2);
+		if (bBootKey || (nRetroKey == RETROK_F12 && bDown && bWinDown))
 		{
 			s_bActive.store (true, std::memory_order_release);
 			return TRUE;
@@ -1976,4 +2114,34 @@ void BareMenuTick (void)
 	{
 		Draw ();
 	}
+}
+
+boolean BareMenuBootWindow (unsigned nSeconds)
+{
+	if (nSeconds == 0)
+	{
+		return FALSE;
+	}
+
+	s_bOpenedAtBoot = false;
+	s_bBootWindow.store (true, std::memory_order_release);
+
+	const u64 nEnd = BareMicros () + static_cast<u64> (nSeconds) * 1000000;
+	while (BareMicros () < nEnd || BareMenuActive ())
+	{
+		if (BareMenuActive ())
+		{
+			s_bOpenedAtBoot = true;
+			s_bBootWindow.store (false, std::memory_order_release);
+			BareMenuTick ();
+		}
+		else
+		{
+			CScheduler::Get ()->Yield ();
+		}
+		CTimer::SimpleMsDelay (15);
+	}
+
+	s_bBootWindow.store (false, std::memory_order_release);
+	return s_bOpenedAtBoot ? TRUE : FALSE;
 }

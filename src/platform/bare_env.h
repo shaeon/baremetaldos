@@ -357,6 +357,11 @@ boolean BareMenuActive (void);
 ///\t   core: key repeat, live values, drawing.
 void    BareMenuTick (void);
 
+/// \brief At boot, before DOSBox starts: wait nSeconds for SUPR or F2, and if
+///\t   one is pressed run the menu until it is closed.  TRUE if it was opened
+///\t   (the boot screen then needs redrawing).  0 seconds returns at once.
+boolean BareMenuBootWindow (unsigned nSeconds);
+
 /// \brief For the menu (bare_libretro.cpp): release every key DOS thinks is
 ///\t   down; and the two ways out that Ctrl+F9 and Ctrl+Alt+PetSis use.
 void    BareCoreReleaseAllKeys (void);

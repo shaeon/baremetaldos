@@ -501,6 +501,22 @@ boolean CKernel::Initialize (void)
 
 	Report ("input: ok");
 
+	// --- SUPR / F2: the setup menu before DOSBox starts -----------------------
+	// Like a PC's BIOS: a short window to get into the setup, for the settings
+	// that only apply before DOSBox exists.  Win+F12 opens it later as well.
+	if (Config.nSetupWait != 0)
+	{
+		Report ("Pulsa SUPR o F2 para entrar en el SETUP (%u s)", Config.nSetupWait);
+		if (BareMenuBootWindow (Config.nSetupWait))
+		{
+			// The menu drew over the boot screen: start it again.
+			BareVideoFill (0x00000000);
+			BareVideoStatusReset ();
+			m_nStatusLine = 0;
+			Report ("setup: cerrado, sigue el arranque");
+		}
+	}
+
 	// --- report what we found --------------------------------------------
 	const char *pContent = PickContent ();
 	Report ("content: %s", pContent);

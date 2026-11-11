@@ -912,7 +912,12 @@ void BareVideoPresent (const u32 *pPixels, unsigned nWidth, unsigned nHeight,
 	// and the picture that replaced it stays.  Two presents of margin, because a
 	// mode can arrive twice (one from retro_get_system_av_info, one from the
 	// first render).
-	if (s_bStatusEnabled && pPixels != nullptr && nWidth != 0 && nHeight != 0)
+	// The setup menu opened at boot (SUPR) presents its own pictures before
+	// DOSBox exists: those are not DOS's first frame, and must neither end the
+	// boot screen nor arm the core 2 presenter (which waits for the boot
+	// screen to be gone).
+	if (s_bStatusEnabled && pPixels != nullptr && nWidth != 0 && nHeight != 0
+	    && !BareMenuActive ())
 	{
 		s_bStatusEnabled = false;
 		s_bStatusScrolled = true;

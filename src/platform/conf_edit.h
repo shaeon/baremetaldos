@@ -400,6 +400,69 @@ inline void SetCommand (CConfText &C, const std::string &Command, const std::str
 	C.InsertLine (nAt, Line);
 }
 
+// --- [autoexec] block owned by the setup menu -------------------------------------
+//
+// What runs at boot (a game) is a few lines - change drive, change folder, run
+// - so the menu keeps them between two marker comments at the end of
+// [autoexec], and only ever touches what is between its own markers.  DOSBox
+// ignores '#' lines in [autoexec].
+
+constexpr const char *BlockBegin = "# BM-DOS: arranque (lo escribe el menu Win+F12)";
+constexpr const char *BlockEnd = "# BM-DOS: fin del arranque";
+
+inline std::vector<std::string> GetBlock (const CConfText &C)
+{
+	std::vector<std::string> Out;
+	bool bIn = false;
+	for (const auto &L : C.SectionLines ("autoexec"))
+	{
+		const std::string T = Trim (L.second);
+		if (T == BlockBegin) { bIn = true; continue; }
+		if (T == BlockEnd) break;
+		if (bIn && !T.empty ()) Out.push_back (T);
+	}
+	return Out;
+}
+
+/// Replace the block's lines; an empty list removes the block, markers included.
+inline void SetBlock (CConfText &C, const std::vector<std::string> &Lines)
+{
+	// Out with the old block.
+	long nBegin = -1, nEnd = -1;
+	for (const auto &L : C.SectionLines ("autoexec"))
+	{
+		const std::string T = Trim (L.second);
+		if (T == BlockBegin && nBegin < 0) nBegin = static_cast<long> (L.first);
+		else if (T == BlockEnd && nBegin >= 0) { nEnd = static_cast<long> (L.first); break; }
+	}
+	size_t nAt = 0;
+	if (nBegin >= 0)
+	{
+		const long nLast = nEnd >= 0 ? nEnd : nBegin;
+		for (long i = nLast; i >= nBegin; i--) C.RemoveLine (static_cast<size_t> (i));
+		nAt = static_cast<size_t> (nBegin);
+	}
+	if (Lines.empty ()) return;
+
+	if (nBegin < 0)
+	{
+		// At the end of [autoexec], after its last non-blank line.
+		bool bFound = false;
+		for (const auto &L : C.SectionLines ("autoexec"))
+			if (!Trim (L.second).empty ()) { nAt = L.first + 1; bFound = true; }
+		if (!bFound)
+		{
+			const long nHeader = C.SectionHeader ("autoexec");
+			if (nHeader < 0) { C.InsertLine (C.LineCount (), "[autoexec]"); nAt = C.LineCount (); }
+			else nAt = static_cast<size_t> (nHeader) + 1;
+		}
+	}
+
+	C.InsertLine (nAt++, BlockBegin);
+	for (const std::string &L : Lines) C.InsertLine (nAt++, L);
+	C.InsertLine (nAt, BlockEnd);
+}
+
 // --- [autoexec] MOUNT lines --------------------------------------------------
 //
 // "MOUNT C /dos -freesize 1024": the drive letter is the second word and the
