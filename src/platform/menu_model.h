@@ -379,10 +379,10 @@ public:
 						  ? Items[nSel].Help : Pages[m_nPage].Help;
 			S.Put (HelpCol + 1, BodyTop, nSel >= 0 ? Items[nSel].Label : Pages[m_nPage].Title, Blue, LightGrey, Cols - HelpCol - 2);
 			S.HLine (HelpCol, BodyTop + 1, Cols - HelpCol);
-			Wrap (S, HelpCol + 1, BodyTop + 2, Cols - HelpCol - 2, BodyRows - 6, Help);
+			Wrap (S, HelpCol + 1, BodyTop + 2, Cols - HelpCol - 2, BodyRows - 7, Help);
 
-			S.HLine (HelpCol, BodyTop + BodyRows - 4, Cols - HelpCol);
-			Wrap (S, HelpCol + 1, BodyTop + BodyRows - 3, Cols - HelpCol - 2, 3, Texts.ApplyLegend);
+			S.HLine (HelpCol, BodyTop + BodyRows - 5, Cols - HelpCol);
+			Wrap (S, HelpCol + 1, BodyTop + BodyRows - 4, Cols - HelpCol - 2, 4, Texts.ApplyLegend);
 		}
 
 		// Keys.

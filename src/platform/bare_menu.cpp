@@ -34,6 +34,7 @@
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 
 #include "libretro.h"
@@ -139,11 +140,57 @@ enum TSettingId
 	SetVideoCore,
 	SetVsync,
 	SetScaler,
+
+	SetMachine = 200,
+	SetMemSize,
+	SetCPUCore,
+	SetCPUType,
+	SetCycles,
+	SetCycleStep,
 };
 
 void LiveScaler (const std::string &Value)
 {
 	BareVideoSetSharpScaling (Value == "sharp" ? TRUE : FALSE);
+}
+
+} // namespace
+
+// DOSBox's own globals (src/cpu/cpu.cpp): the cycle count the emulated CPU
+// runs at, and whether it is a fixed number.  Ctrl+F11/F12 change the first;
+// the menu does the same while the machine is paused.  Bit32s is int32_t.
+extern int32_t CPU_CycleMax;
+extern bool CPU_CycleAutoAdjust;
+
+namespace {
+
+void LiveCycles (const std::string &Value)
+{
+	// Only a fixed count is applied at once, and only if the machine runs a
+	// fixed count now; switching modes (auto, max) waits for the restart.
+	if (Value.rfind ("fixed ", 0) == 0 && !CPU_CycleAutoAdjust)
+	{
+		const int nCycles = atoi (Value.c_str () + 6);
+		if (nCycles > 0)
+		{
+			CPU_CycleMax = nCycles;
+		}
+	}
+}
+
+// "24000", "fixed  24000", "Fixed 24000" -> "fixed 24000"; anything else as is.
+std::string NormaliseCycles (const std::string &In)
+{
+	std::string s = bareconf::Lower (bareconf::Trim (In));
+	if (!s.empty () && s.find_first_not_of ("0123456789") == std::string::npos)
+	{
+		return "fixed " + s;
+	}
+	if (s.rfind ("fixed", 0) == 0)
+	{
+		return "fixed " + bareconf::Trim (s.substr (5));
+	}
+	return s;
 }
 
 std::vector<TSetting> s_Settings;
@@ -183,6 +230,67 @@ void DefineSettings (void)
 		"se interpola de las dos más cercanas. Se ve al momento, en este mismo menú.",
 		TApply::Now,
 		{ { "Nítido", "sharp" }, { "Suave", "smooth" } }, 0, LiveScaler });
+
+	// --- Máquina: dosbox.conf -----------------------------------------------
+
+	s_Settings.push_back ({ SetMachine, FileDOSBox, "dosbox", "machine", "Tipo de máquina",
+		"La tarjeta de vídeo del PC emulado. SVGA S3 sirve para casi todo, incluidos los "
+		"juegos VESA. Los juegos de 8088 que esperan CGA o Tandy (gráficos y sonido de "
+		"16 colores) piden esas máquinas; Hercules, para los de monocromo.",
+		TApply::RestartDOSBox,
+		{ { "SVGA S3 Trio64", "svga_s3" }, { "SVGA Tseng ET4000", "svga_et4000" },
+		  { "SVGA Tseng ET3000", "svga_et3000" }, { "SVGA Paradise", "svga_paradise" },
+		  { "VGA", "vgaonly" }, { "EGA", "ega" }, { "CGA", "cga" }, { "Tandy", "tandy" },
+		  { "PCjr", "pcjr" }, { "Hercules", "hercules" },
+		  { "VESA sin LFB", "vesa_nolfb" }, { "VESA antigua", "vesa_oldvbe" } },
+		0, nullptr });
+
+	s_Settings.push_back ({ SetMemSize, FileDOSBox, "dosbox", "memsize", "Memoria",
+		"La RAM del PC emulado. 16 MB valen para casi todo; algún juego viejo falla con "
+		"mucha memoria y alguno de Windows 9x o con DOS4GW agradece 32 o más (63 es el "
+		"máximo de DOSBox).",
+		TApply::RestartDOSBox,
+		{ { "1 MB", "1" }, { "2 MB", "2" }, { "4 MB", "4" }, { "8 MB", "8" },
+		  { "16 MB", "16" }, { "32 MB", "32" }, { "63 MB", "63" } },
+		4, nullptr });
+
+	s_Settings.push_back ({ SetCPUCore, FileDOSBox, "cpu", "core", "Núcleo de CPU",
+		"Cómo emula DOSBox el x86. Dinámico traduce a código ARM y es el rápido; normal "
+		"interpreta instrucción a instrucción (más lento, a veces más compatible); simple "
+		"solo sirve para modo real; auto empieza en normal y pasa a dinámico en modo "
+		"protegido.",
+		TApply::RestartDOSBox,
+		{ { "Dinámico", "dynamic" }, { "Normal", "normal" }, { "Simple", "simple" }, { "Auto", "auto" } },
+		0, nullptr });
+
+	s_Settings.push_back ({ SetCPUType, FileDOSBox, "cpu", "cputype", "Tipo de CPU",
+		"El juego de instrucciones del procesador emulado. Auto vale para casi todo; "
+		"386_prefetch lo necesitan algunos juegos con código automodificable; pentium_slow "
+		"da instrucciones de Pentium a los que las comprueban.",
+		TApply::RestartDOSBox,
+		{ { "Auto", "auto" }, { "386", "386" }, { "386 lento", "386_slow" },
+		  { "386 prefetch", "386_prefetch" }, { "486 lento", "486_slow" },
+		  { "Pentium lento", "pentium_slow" } },
+		0, nullptr });
+
+	s_Settings.push_back ({ SetCycles, FileDOSBox, "cpu", "cycles", "Velocidad",
+		"Cuántas instrucciones ejecuta el PC emulado. Cada valor imita a un procesador "
+		"de la época (aproximado). Se aplica al momento si la máquina va a ciclos fijos; "
+		"después afina con Ctrl+F11/F12 mirando \"pace\" en el panel: 35/70 es velocidad "
+		"real. Más de lo que la placa puede dar se oye como cortes de sonido.",
+		TApply::Now,
+		{ { "8088 a 4,77 MHz", "fixed 300" }, { "286 a 12 MHz", "fixed 1500" },
+		  { "386SX a 20 MHz", "fixed 3000" }, { "386DX a 33 MHz", "fixed 6000" },
+		  { "486DX a 33 MHz", "fixed 12000" }, { "486DX2 a 66 MHz", "fixed 24000" },
+		  { "Pentium a 60 MHz", "fixed 31000" }, { "Pentium a 75 MHz", "fixed 43500" },
+		  { "Pentium a 100 MHz", "fixed 60000" } },
+		5, LiveCycles });
+
+	s_Settings.push_back ({ SetCycleStep, FileDOSBox, "cpu", "cycleup", "Paso de Ctrl+F11/F12",
+		"Cuántos ciclos suben o bajan Ctrl+F12 y Ctrl+F11. Se guarda para los dos.",
+		TApply::RestartDOSBox,
+		{ { "500", "500" }, { "1000", "1000" }, { "2000", "2000" }, { "5000", "5000" } },
+		2, nullptr });
 }
 
 TSetting *FindSetting (int nId)
@@ -268,7 +376,11 @@ void LoadSettings (void)
 				bFound = true;
 				bool bKnown = false;
 				for (const TChoice &C : S.Choices) bKnown = bKnown || C.Value == Value;
-				if (!bKnown) S.Choices.insert (S.Choices.begin (), TChoice { Value, Value });
+				if (!bKnown)
+				{
+					S.Choices.insert (S.Choices.begin (), TChoice { Value, Value });
+					S.nDefault++;		// the default stays the same mode
+				}
 			}
 		}
 		else if (S.File == FileBoot)
@@ -280,7 +392,27 @@ void LoadSettings (void)
 			bFound = DOSBoxConf.Get (S.pSection, S.pKey, &Value);
 		}
 
-		S.nSaved = bFound ? IndexOf (S, bareconf::Lower (bareconf::Trim (Value))) : S.nDefault;
+		Value = bareconf::Lower (bareconf::Trim (Value));
+		if (S.nId == SetCycles)
+		{
+			Value = NormaliseCycles (Value);
+		}
+
+		// A value the list does not have is shown as it is, as the first
+		// choice, so that the menu never shows something the card does not
+		// say - and saving without touching it writes it back unchanged.
+		if (bFound && S.nId != SetDisplay)
+		{
+			bool bKnown = false;
+			for (const TChoice &C : S.Choices) bKnown = bKnown || C.Value == Value;
+			if (!bKnown && !Value.empty ())
+			{
+				S.Choices.insert (S.Choices.begin (), TChoice { Value, Value });
+				S.nDefault++;
+			}
+		}
+
+		S.nSaved = bFound ? IndexOf (S, Value) : S.nDefault;
 		S.nPending = S.nSaved;
 	}
 }
@@ -298,7 +430,12 @@ bool ModifiedNeedsBoard (void)
 {
 	for (const TSetting &S : s_Settings)
 	{
-		if (S.nPending != S.nSaved && S.Apply == TApply::RestartBoard) return true;
+		// R as well as B: DOSBox-core's retro_reset() rebuilds the machine on
+		// the emulator thread from an unknown state (see the Ctrl+Alt+Del
+		// note in bare_libretro.cpp), so for now a DOSBox restart is a board
+		// restart.  The marks stay apart for when that changes.
+		if (S.nPending != S.nSaved
+		    && (S.Apply == TApply::RestartBoard || S.Apply == TApply::RestartDOSBox)) return true;
 	}
 	return false;
 }
@@ -382,7 +519,13 @@ bool SaveSettings (void)
 		for (const TSetting &S : s_Settings)
 		{
 			if (S.nPending != S.nSaved && S.File == FileDOSBox)
+			{
 				Conf.Set (S.pSection, S.pKey, S.Choices[S.nPending].Value);
+				if (S.nId == SetCycleStep)
+				{
+					Conf.Set (S.pSection, "cycledown", S.Choices[S.nPending].Value);
+				}
+			}
 		}
 		bOk = WriteText (DOSBoxPath, Conf.Text ()) && bOk;
 	}
@@ -580,16 +723,26 @@ void BuildPages (void)
 	std::vector<TPage> Pages;
 	Pages.push_back (PageSistema ());
 
-	Pages.push_back (PagePlanned ("Máquina", "El PC que emula DOSBox.",
 	{
-		{ "Tipo de máquina", TApply::RestartDOSBox },
-		{ "Memoria", TApply::RestartDOSBox },
-		{ "Núcleo de CPU", TApply::RestartDOSBox },
-		{ "Tipo de CPU", TApply::RestartDOSBox },
-		{ "Velocidad (CPU real)", TApply::Now },
-		{ "Ciclos", TApply::Now },
-		{ "Paso de Ctrl+F11/F12", TApply::Now },
-	}));
+		TPage P;
+		P.Title = "Máquina";
+		P.Help = "El PC que emula DOSBox. Se guarda en dosbox.conf.";
+		P.Items =
+		{
+			Section ("PC emulado"),
+			SettingItem (*FindSetting (SetMachine)),
+			SettingItem (*FindSetting (SetMemSize)),
+			Section ("Procesador"),
+			SettingItem (*FindSetting (SetCPUCore)),
+			SettingItem (*FindSetting (SetCPUType)),
+			SettingItem (*FindSetting (SetCycles)),
+			SettingItem (*FindSetting (SetCycleStep)),
+			Info ("Ciclos ahora", CPU_CycleAutoAdjust ? std::string ("automático")
+						: Format ("%d", static_cast<int> (CPU_CycleMax)),
+			      "Los que usa la máquina en este momento, Ctrl+F11/F12 incluidos."),
+		};
+		Pages.push_back (P);
+	}
 
 	Pages.push_back (PagePlanned ("Unidades", "Carpetas, imágenes de disco y CD-ROM.",
 	{
@@ -682,7 +835,7 @@ void SetupTexts (void)
 	// below 0x20 and Circle's table starts at 0x21).
 	s_Menu.Texts.KeysLine1 = "Arriba/Abajo: elegir   Izq/Der: pestaña   Intro +/-: cambiar   Esc: al juego";
 	s_Menu.Texts.KeysLine2 = "F9 Valores por defecto   F10 Guardar y salir";
-	s_Menu.Texts.ApplyLegend = "R: al reiniciar DOSBox\nB: al reiniciar la placa\nSin marca: al momento";
+	s_Menu.Texts.ApplyLegend = "Sin marca: al momento\nR: al reiniciar DOSBox\n   (de momento, la placa)\nB: al reiniciar la placa";
 }
 
 // --- keys --------------------------------------------------------------------
@@ -764,7 +917,7 @@ void SaveAndLeave (bool bRestartBoard)
 	if (bBoard)
 	{
 		s_Menu.OpenDialog (DlgRestartNow, "Reinicio necesario",
-				   "Guardado. Los ajustes marcados B se aplican al reiniciar la placa.",
+				   "Guardado. Los ajustes marcados R y B se aplican al reiniciar la placa.",
 				   { "Reiniciar ahora", "Más tarde" });
 		return;
 	}
