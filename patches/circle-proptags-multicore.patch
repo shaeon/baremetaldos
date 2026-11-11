@@ -1,0 +1,51 @@
+diff --git a/lib/bcmpropertytags.cpp b/lib/bcmpropertytags.cpp
+index a00a20e1..745d7af9 100644
+--- a/lib/bcmpropertytags.cpp
++++ b/lib/bcmpropertytags.cpp
+@@ -23,6 +23,7 @@
+ #include <circle/bcm2835.h>
+ #include <circle/memory.h>
+ #include <circle/macros.h>
++#include <circle/spinlock.h>
+ #include <assert.h>
+ 
+ struct TPropertyBuffer
+@@ -80,6 +81,16 @@ boolean CBcmPropertyTags::GetTags (void *pTags, unsigned nTagsSize)
+ 	TPropertyBuffer *pBuffer =
+ 		(TPropertyBuffer *) CMemorySystem::GetCoherentPage (COHERENT_SLOT_PROP_MAILBOX);
+ 
++	// There is one property buffer for all cores, and the mailbox's own lock
++	// covers only the exchange with the firmware: filling the buffer before it
++	// and copying the answer out after it were open to another core doing the
++	// same at the same time, each reading the other's answer or a request half
++	// overwritten.  Held for the whole call.  (A call that waits for vertical
++	// sync holds it until the vsync - that was already true of the mailbox
++	// lock.)
++	static CSpinLock s_BufferLock (TASK_LEVEL);
++	s_BufferLock.Acquire ();
++
+ 	pBuffer->nBufferSize = nBufferSize;
+ 	pBuffer->nCode = CODE_REQUEST;
+ 	memcpy (pBuffer->Tags, pTags, nTagsSize);
+@@ -92,6 +103,7 @@ boolean CBcmPropertyTags::GetTags (void *pTags, unsigned nTagsSize)
+ 	u32 nBufferAddress = BUS_ADDRESS ((uintptr) pBuffer);
+ 	if (m_MailBox.WriteRead (nBufferAddress) != nBufferAddress)
+ 	{
++		s_BufferLock.Release ();
+ 		return FALSE;
+ 	}
+ 
+@@ -99,10 +111,13 @@ boolean CBcmPropertyTags::GetTags (void *pTags, unsigned nTagsSize)
+ 
+ 	if (pBuffer->nCode != CODE_RESPONSE_SUCCESS)
+ 	{
++		s_BufferLock.Release ();
+ 		return FALSE;
+ 	}
+ 
+ 	memcpy (pTags, pBuffer->Tags, nTagsSize);
+ 
++	s_BufferLock.Release ();
++
+ 	return TRUE;
+ }

@@ -89,6 +89,7 @@ namespace {
 // and enough slack for core 1 to ride out a slow block.
 constexpr unsigned BlockFrames  = 128;		// rendered per step on core 1
 constexpr unsigned TargetFrames = 1024;		// kept ready for the mixer
+constexpr std::size_t BatchBytes = 96;		// MIDI bytes per render step, ~32 events
 
 baremidi::TSPSCRing<u8, 65536> s_In;		// core 0 -> core 1, MIDI bytes
 baremidi::TSPSCRing<s16, 8192> s_Out;		// core 1 -> core 0, stereo s16
@@ -126,6 +127,7 @@ baremidi::TMidiParser s_Parser;
 std::atomic<u64> s_nBytesDropped {0};		// core 0: MIDI byte ring full
 std::atomic<u64> s_nUnderruns {0};		// core 0: mixer found too few samples
 std::atomic<u64> s_nRendered {0};		// core 1: frames rendered so far
+std::atomic<u64> s_nDiscarded {0};		// core 1: rendered with nobody to hear them
 std::atomic<unsigned> s_nPeak {0};		// core 0: loudest MIDI sample mixed
 unsigned s_nMidiVolume256 = 256;		// core 0: 64..512 for 25..200 %
 
@@ -164,23 +166,39 @@ void Core1Loop (void)
 			continue;
 		}
 
-		// Events first, so that a note-on that arrived during the last block
-		// is heard in the next one.
+		// Events in small batches, with audio rendered between them.  The
+		// synthesizers apply notes only when they render (FluidSynth queues
+		// them: polyphony x 64 entries), so events that keep coming while
+		// nothing renders fill that queue.  It used to happen whenever the
+		// output stalled - the mixer not taking samples, the ring full - while
+		// the game kept playing: "Ringbuffer full", notes lost, note-offs
+		// among them, voices held for ever, then "Failed to allocate a
+		// synthesis process" (reproduced on the PC with the output stopped
+		// while 6000 notes came in: 13757 and 6322 of them; none after).
 		TSynthSink Sink {pSynth};
-		std::size_t nBytes;
-		while ((nBytes = s_In.Read (Bytes, sizeof Bytes)) != 0)
+		const std::size_t nBytes = s_In.Read (Bytes, BatchBytes);
+		for (std::size_t i = 0; i < nBytes; i++)
 		{
-			for (std::size_t i = 0; i < nBytes; i++)
-			{
-				s_Parser.Feed (Bytes[i], Sink);
-			}
+			s_Parser.Feed (Bytes[i], Sink);
 		}
 
-		if (s_Out.Count () / 2 < TargetFrames)
+		const unsigned nQueued = static_cast<unsigned> (s_Out.Count () / 2);
+		const bool bRoom = nQueued + BlockFrames <= s_Out.Capacity () / 2;
+		if (nQueued < TargetFrames || (nBytes != 0 && bRoom))
 		{
+			// Ahead of the mixer as usual, or a little further ahead to apply
+			// a batch of events: the ring has room for that.
 			pSynth->Render (Block, BlockFrames);
-			s_Out.Write (Block, BlockFrames * 2);	// cannot overflow: Count < Target < capacity
+			s_Out.Write (Block, BlockFrames * 2);
 			s_nRendered.fetch_add (BlockFrames, std::memory_order_relaxed);
+		}
+		else if (nBytes != 0)
+		{
+			// Events, and nobody is taking the audio: render anyway, so that
+			// the synthesizer applies them, and let the block go - it could
+			// not have been heard.  The notes and their releases are kept.
+			pSynth->Render (Block, BlockFrames);
+			s_nDiscarded.fetch_add (BlockFrames, std::memory_order_relaxed);
 		}
 		else
 		{
@@ -355,6 +373,25 @@ private:
 // FluidSynth reads sample data at load time unless dynamic loading is asked
 // for, and it is not.
 
+// FluidSynth's log, into Circle's: errors always, warnings at most 4 a second,
+// information and debug never.
+void FluidLog (int nLevel, const char *pMessage, void *)
+{
+	if (nLevel == FLUID_INFO || nLevel == FLUID_DBG || pMessage == nullptr)
+	{
+		return;
+	}
+	static u64 s_nWindow = 0;
+	static unsigned s_nInWindow = 0;
+	const u64 nNow = CTimer::GetClockTicks64 ();
+	if (nNow - s_nWindow > 1000000) { s_nWindow = nNow; s_nInWindow = 0; }
+	if (nLevel == FLUID_WARN && ++s_nInWindow > 4)
+	{
+		return;
+	}
+	CLogger::Get ()->Write ("fluidsynth", nLevel == FLUID_WARN ? LogWarning : LogError, "%s", pMessage);
+}
+
 class CBareSoundFont : public CBareSynth
 {
 public:
@@ -390,10 +427,20 @@ public:
 		// anyway is rounded off by the soft limiter in bare_audio.cpp.
 		fluid_settings_setnum (m_pSettings, "synth.gain", 0.3);
 #if RASPPI <= 3
-		fluid_settings_setint (m_pSettings, "synth.polyphony", 64);
+		fluid_settings_setint (m_pSettings, "synth.polyphony", 96);
 #else
-		fluid_settings_setint (m_pSettings, "synth.polyphony", 200);
+		fluid_settings_setint (m_pSettings, "synth.polyphony", 256);
 #endif
+
+		// FluidSynth's messages go to its default log function, which
+		// prints to stdout - and stdout drew on the screen (see kernel.cpp,
+		// where stdout now goes to the serial port too).  Into Circle's log
+		// instead, and no more than a few a second: a fault that repeats
+		// per event would otherwise flood even the serial line.
+		for (int nLevel : { FLUID_PANIC, FLUID_ERR, FLUID_WARN, FLUID_INFO, FLUID_DBG })
+		{
+			fluid_set_log_function (nLevel, FluidLog, nullptr);
+		}
 
 		m_pSynth = new_fluid_synth (m_pSettings);
 		if (m_pSynth == nullptr)

@@ -432,6 +432,16 @@ boolean CKernel::Initialize (void)
 	// status lines, which draw into the port's own pages.
 	mLogger.SetNewTarget (&mSerial);
 
+	// And newlib's stdout / stderr, for the same reason: circle-stdlib binds
+	// them to a console on that same screen device, so a library that prints
+	// (FluidSynth's warnings did, over the setup menu) drew into page 1.  A
+	// console on the serial port in both directions replaces it.
+	static CConsole s_SerialConsole (&mSerial, &mSerial);
+	if (s_SerialConsole.Initialize ())
+	{
+		CGlueStdioInit (s_SerialConsole);
+	}
+
 	m_nStatusLine = 0;
 	BareVideoStatusReset ();
 	Report ("BM-DOS %s - DOSBox on baremetal Raspberry Pi", DOSBOX_SNAPSHOT);
