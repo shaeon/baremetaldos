@@ -595,6 +595,7 @@ APP_SRCS := \
 	src/platform/bare_sysinfo.cpp \
 	src/platform/bare_dynarec.cpp \
 	src/platform/bare_cores.cpp \
+	src/platform/bare_menu.cpp \
 	src/platform/bare_midi.cpp \
 	src/dosbox-stub/midi_stub.cpp \
 	src/dosbox-stub/posix_stubs.cpp
@@ -1314,6 +1315,15 @@ check-midi:
 		-o build/midi_test scripts/hostcheck/midi_test.cpp
 	@build/midi_test
 
+# The setup menu's model and layout (menu_model.h): pages, cursor, keys, and
+# the 80x30 grid.
+.PHONY: check-menu
+check-menu:
+	@mkdir -p build
+	@$(HOST_CXX) -std=gnu++23 -O1 -Wall -Wextra -Wpedantic -Wshadow \
+		-o build/menu_test scripts/hostcheck/menu_test.cpp
+	@build/menu_test
+
 # Which source rows make each output row (scale_weights.h): sharp/smooth.
 .PHONY: check-scale
 check-scale:
@@ -1398,7 +1408,7 @@ check-dynarec-hook:
 # config parser.  This is the target to run before a cross build.
 check-host: check-platform check-kernel check-bootconf check-scaling check-dynarec \
             check-coreopts check-resample check-storage check-governor check-portorder \
-            check-dynarec-hook check-midi check-frames check-audio check-scale
+            check-dynarec-hook check-midi check-frames check-audio check-scale check-menu
 print-srcs:
 	@echo $(ALL_SRCS)
 

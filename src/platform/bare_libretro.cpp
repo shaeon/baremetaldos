@@ -379,6 +379,20 @@ extern "C" void BareDeliverKey (unsigned nRetroKey, boolean bDown)
 		return;
 	}
 
+	// The setup menu (Win+F12) sees every key first.  While it is open the
+	// keys are its own: none reaches DOS, so nothing typed in the menu turns
+	// up in the game afterwards.  Win counts as held while its key is down,
+	// including the press of Win itself.
+	{
+		const boolean bWin = (nRetroKey == RETROK_LSUPER || nRetroKey == RETROK_RSUPER)
+				     ? bDown
+				     : (s_KeyState[RETROK_LSUPER] || s_KeyState[RETROK_RSUPER]) ? TRUE : FALSE;
+		if (BareMenuKey (nRetroKey, bDown, bWin))
+		{
+			return;
+		}
+	}
+
 	BarePushKey (nRetroKey, bDown);
 
 	s_nKeyEvents++;
@@ -443,32 +457,7 @@ extern "C" void BareDeliverKey (unsigned nRetroKey, boolean bDown)
 	// the next thing on screen is a black display with no cursor.
 	if (nRetroKey == RETROK_F9 && bDown && IsCtrlDown ())
 	{
-		CLogger::Get ()->Write (FromBare, LogWarning,
-					"Ctrl+F9: shutting down, do not cut power yet");
-
-		// Forced visible: this message is the whole point of the key press,
-		// and honouring "panel hidden" here would reproduce exactly the
-		// silent shutdown it exists to prevent.
-		//
-		// .65e: and the *shape* of this matters as much as the visibility.
-		// Pressing the key with the panel hidden used to switch the panel on
-		// and freeze both its text and the picture: writing the
-		// line and only then switching the panel on draws the text into a
-		// strip that ComputeDestination() has not reserved yet, so the next
-		// frame of the emulator paints over it and the slot remembers a
-		// rectangle it no longer owns.  Nothing repaints it, so the two of
-		// them - the frozen text and the frozen picture - stay on screen for
-		// ever.  Turning the panel on FIRST reserves the strip and draws an
-		// empty slot, and the message then goes into a rectangle the emulator
-		// will never touch.
-		BareVideoFooterSetVisible (TRUE);
-		BareVideoFooter (0, "Ctrl+F9: flushing the card, then halt - do NOT cut power yet");
-
-		// The banner card too, so that the reason the machine is about to stop
-		// is on the screen as well as in the log.
-		BareVideoStatusPrint ("shutting down: the card is being flushed now");
-
-		s_bWantsExit = TRUE;
+		BareCoreRequestShutdown ();
 		return;
 	}
 
@@ -521,15 +510,7 @@ extern "C" void BareDeliverKey (unsigned nRetroKey, boolean bDown)
 	// switch does but without getting up.
 	if (nRetroKey == RETROK_SYSREQ && bDown && IsCtrlDown () && IsAltDown ())
 	{
-		CLogger::Get ()->Write (FromBare, LogWarning,
-					"Ctrl+Alt+PetSis: rebooting the board");
-		BareVideoStatusPrint ("Ctrl+Alt+PetSis: rebooting");
-
-		// One frame's worth of time for the message to reach the display,
-		// then Circle's own reboot().  Not returnToEL2h(), not halt(): the
-		// point is to come back up, not to stop.
-		CTimer::SimpleMsDelay (200);
-		reboot ();
+		BareCoreRequestReboot ();
 		return;
 	}
 
@@ -1184,4 +1165,74 @@ void BareCoreDeinit (void)
 				"core: unloaded in %u ms", nMs);
 
 	BareVideoFooter (0, "emulator stopped: flushing the card");
+}
+
+// ---------------------------------------------------------------------------
+// Shared with the setup menu (bare_menu.cpp)
+// ---------------------------------------------------------------------------
+
+void BareCoreReleaseAllKeys (void)
+{
+	// Every key DOS believes is down is released, in the state the core polls
+	// and through its keyboard callback.  Opening the menu with Win+F12 leaves
+	// Win down as far as DOS knows, and a key released while the menu owns the
+	// keyboard would otherwise stay down in the game for ever.
+	for (unsigned nKey = 0; nKey < 512; nKey++)
+	{
+		if (!s_KeyState[nKey])
+		{
+			continue;
+		}
+
+		s_KeyState[nKey] = false;
+		if (s_bCoreKeyboardCallbackSet && s_CoreKeyboardCallback.callback != nullptr)
+		{
+			s_CoreKeyboardCallback.callback (false, nKey, 0, 0);
+		}
+	}
+}
+
+// Ctrl+F9 and the menu's "Apagado seguro" take the same road.
+void BareCoreRequestShutdown (void)
+{
+	CLogger::Get ()->Write (FromBare, LogWarning,
+				"Ctrl+F9: shutting down, do not cut power yet");
+
+	// Forced visible: this message is the whole point of the key press,
+	// and honouring "panel hidden" here would reproduce exactly the
+	// silent shutdown it exists to prevent.
+	//
+	// .65e: and the *shape* of this matters as much as the visibility.
+	// Pressing the key with the panel hidden used to switch the panel on
+	// and freeze both its text and the picture: writing the
+	// line and only then switching the panel on draws the text into a
+	// strip that ComputeDestination() has not reserved yet, so the next
+	// frame of the emulator paints over it and the slot remembers a
+	// rectangle it no longer owns.  Nothing repaints it, so the two of
+	// them - the frozen text and the frozen picture - stay on screen for
+	// ever.  Turning the panel on FIRST reserves the strip and draws an
+	// empty slot, and the message then goes into a rectangle the emulator
+	// will never touch.
+	BareVideoFooterSetVisible (TRUE);
+	BareVideoFooter (0, "Ctrl+F9: flushing the card, then halt - do NOT cut power yet");
+
+	// The banner card too, so that the reason the machine is about to stop
+	// is on the screen as well as in the log.
+	BareVideoStatusPrint ("shutting down: the card is being flushed now");
+
+	s_bWantsExit = TRUE;
+}
+
+// Ctrl+Alt+PetSis and the menu's "Reiniciar la placa".
+void BareCoreRequestReboot (void)
+{
+	CLogger::Get ()->Write (FromBare, LogWarning,
+				"Ctrl+Alt+PetSis: rebooting the board");
+	BareVideoStatusPrint ("Ctrl+Alt+PetSis: rebooting");
+
+	// One frame's worth of time for the message to reach the display,
+	// then Circle's own reboot().  Not returnToEL2h(), not halt(): the
+	// point is to come back up, not to stop.
+	CTimer::SimpleMsDelay (200);
+	reboot ();
 }

@@ -125,7 +125,23 @@ class CMemorySystem
 {
 public:
 	static CMemorySystem *Get (void);
+	u64 GetMemSize (void) const;
 };
+EOF
+
+# The setup menu draws with Circle's 8x16 font table (bare_menu.cpp).
+cat > circle/font.h <<'EOF'
+#pragma once
+struct TFont
+{
+	unsigned width;
+	unsigned height;
+	unsigned extra_height;
+	unsigned first_char;
+	unsigned last_char;
+	const void *data;
+};
+extern const TFont Font8x16;
 EOF
 
 # bare_midi.cpp subclasses CMultiCoreSupport to run the synthesizers on core 1,

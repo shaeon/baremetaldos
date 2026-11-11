@@ -1187,6 +1187,19 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		// zeros would look like a perfect governor condition and walk the
 		// clock down, which is right, but they would also look like a
 		// stall to the watchdog, which is not.
+		// The setup menu (Win+F12) pauses the machine like Alt+Pause, and
+		// gets the loop's time instead: keys, live values, drawing.
+		if (BareMenuActive ())
+		{
+			BareMenuTick ();
+			CTimer::SimpleMsDelay (15);
+
+			nRefStart = BareMicros ();
+			nFrameIndex = 0;
+
+			continue;
+		}
+
 		if (BareCorePaused ())
 		{
 			CTimer::SimpleMsDelay (20);

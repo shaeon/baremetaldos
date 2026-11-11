@@ -78,6 +78,21 @@ u32 *s_pRowBuffer3 = nullptr;		// the mixed row, before it goes to the frame buf
 // made from source rows when the picture is enlarged by a fraction.  Set once
 // before the first frame; read by whichever core presents.
 bool s_bSharpScale = true;
+
+// The last frame DOSBox presented, as DOSBox handed it over.  While the core
+// is paused - which is what the setup menu does - DOSBox does not touch its
+// render buffer, so this pointer stays valid until the next retro_run().  The
+// menu copies it when it opens (BareVideoSaveScreen) and shows it again when
+// it closes: DOSBox only sends a new frame when something changes, and the
+// menu's picture would otherwise stay on screen over an idle DOS prompt.
+const u32 *s_pLastCorePixels = nullptr;
+unsigned s_nLastCoreWidth = 0;
+unsigned s_nLastCoreHeight = 0;
+unsigned s_nLastCorePitch = 0;
+
+u32 *s_pSavedScreen = nullptr;
+unsigned s_nSavedWidth = 0;
+unsigned s_nSavedHeight = 0;
 unsigned s_nRowBufferPixels = 0;
 
 CCharGenerator s_Font;
@@ -918,6 +933,14 @@ void BareVideoPresent (const u32 *pPixels, unsigned nWidth, unsigned nHeight,
 
 	s_nFramesPresented++;
 	s_nLastFrameMicros = BareMicros ();
+
+	if (!BareMenuActive ())
+	{
+		s_pLastCorePixels = pPixels;
+		s_nLastCoreWidth = nWidth;
+		s_nLastCoreHeight = nHeight;
+		s_nLastCorePitch = nPitchBytes;
+	}
 
 	// Note for whoever reads this next: presenting a DOSBox frame does NOT
 	// clear the status text, because the emulator's output is drawn inside the
@@ -2521,4 +2544,57 @@ void BareVideoPresenterStats (TBareVideoPresenterStats *pStats)
 void BareVideoSetSharpScaling (boolean bSharp)
 {
 	s_bSharpScale = bSharp != FALSE;
+}
+
+void BareVideoSaveScreen (void)
+{
+	delete[] s_pSavedScreen;
+	s_pSavedScreen = nullptr;
+
+	if (s_pLastCorePixels == nullptr || s_nLastCoreWidth == 0 || s_nLastCoreHeight == 0)
+	{
+		return;
+	}
+
+	s_pSavedScreen = new u32[s_nLastCoreWidth * s_nLastCoreHeight];
+	if (s_pSavedScreen == nullptr)
+	{
+		return;
+	}
+
+	for (unsigned nY = 0; nY < s_nLastCoreHeight; nY++)
+	{
+		memcpy (s_pSavedScreen + nY * s_nLastCoreWidth,
+			s_pLastCorePixels + nY * (s_nLastCorePitch / 4),
+			s_nLastCoreWidth * sizeof (u32));
+	}
+	s_nSavedWidth = s_nLastCoreWidth;
+	s_nSavedHeight = s_nLastCoreHeight;
+}
+
+void BareVideoRestoreScreen (void)
+{
+	if (s_pSavedScreen == nullptr)
+	{
+		return;
+	}
+
+	BareVideoPresent (s_pSavedScreen, s_nSavedWidth, s_nSavedHeight,
+			  s_nSavedWidth * static_cast<unsigned> (sizeof (u32)));
+
+	// Keep the copy: the presenter may still be reading it (core 2 copies
+	// frames through the triple buffer, core 0 into its mirror, so in both
+	// cases the data has been taken by now; freeing at the next save is
+	// simply the safe order).
+}
+
+void BareVideoModeSize (unsigned *pWidth, unsigned *pHeight)
+{
+	if (pWidth != nullptr)  *pWidth = s_nModeWidth;
+	if (pHeight != nullptr) *pHeight = s_nModeHeight;
+}
+
+boolean BareVideoSharpScaling (void)
+{
+	return s_bSharpScale ? TRUE : FALSE;
 }

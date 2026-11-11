@@ -322,6 +322,36 @@ void    BareVideoPresenterConfigure (boolean bEnable, boolean bVsync);
 ///\t   the picture is enlarged by a fraction (sharp, the default), or the
 ///\t   linear interpolation used before (smooth).  Before the first frame.
 void    BareVideoSetSharpScaling (boolean bSharp);
+boolean BareVideoSharpScaling (void);
+
+/// \brief The frame buffer's size (the display mode the port uses).
+void    BareVideoModeSize (unsigned *pWidth, unsigned *pHeight);
+
+/// \brief Keep a copy of the last frame DOSBox presented, and present it
+///\t   again: the setup menu covers the screen while the core is paused, and
+///\t   DOSBox only redraws when its picture changes.
+void    BareVideoSaveScreen (void);
+void    BareVideoRestoreScreen (void);
+
+// ---------------------------------------------------------------------------
+// Setup menu - bare_menu.cpp (Win+F12)
+// ---------------------------------------------------------------------------
+
+/// \brief Every key goes here first.  TRUE when the menu took it (it opened,
+///\t   or it is open): the key must not reach DOS.  bWinDown: a Windows key
+///\t   is held, counting this event.
+boolean BareMenuKey (unsigned nRetroKey, boolean bDown, boolean bWinDown);
+boolean BareMenuActive (void);
+
+/// \brief From the frame loop while the menu is open, instead of running the
+///\t   core: key repeat, live values, drawing.
+void    BareMenuTick (void);
+
+/// \brief For the menu (bare_libretro.cpp): release every key DOS thinks is
+///\t   down; and the two ways out that Ctrl+F9 and Ctrl+Alt+PetSis use.
+void    BareCoreReleaseAllKeys (void);
+void    BareCoreRequestShutdown (void);
+void    BareCoreRequestReboot (void);
 
 /// \brief Take presentation back to core 0 (before anything else draws on
 ///\t   the screen, e.g. at shutdown).  Waits for core 2 to stop; leaves the
