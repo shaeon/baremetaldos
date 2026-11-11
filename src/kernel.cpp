@@ -443,6 +443,14 @@ boolean CKernel::Initialize (void)
 	}
 
 	m_nStatusLine = 0;
+
+	// The boot logo, like a PC BIOS's: at the top with the full boot log, in
+	// the middle of the screen with a quiet one (boot_log = quiet | off).
+	static char LogoCaption[80];
+	snprintf (LogoCaption, sizeof LogoCaption, "BM-DOS %s  -  DOSBox on baremetal Raspberry Pi",
+		  DOSBOX_SNAPSHOT);
+	BareVideoSetBootLogo (m_nBootLogLevel < 2 ? TRUE : FALSE, LogoCaption);
+
 	BareVideoStatusReset ();
 	Report ("BM-DOS %s - DOSBox on baremetal Raspberry Pi", DOSBOX_SNAPSHOT);
 	Report ("by @mmoroca & arena.ai 2026");
@@ -561,7 +569,9 @@ boolean CKernel::Initialize (void)
 
 	// --- the time, before DOSBox reads it ----------------------------------
 	// DOSBox sets DOS's clock once, when its BIOS starts; the board has no
-	// clock of its own, so with the network on, give NTP a few seconds.
+	// clock of its own, so with the network on, give NTP a few seconds - 5 at
+	// most: the network started before the SUPR window, so most of the wait
+	// has usually gone by already.
 	// With WiFi on (the default) but no network chosen yet, nothing will
 	// answer: no wait, on a card fresh out of make-sd or GitHub.
 	const boolean bExpectNet = Config.Network == TBootConfig::NetEthernet
@@ -569,7 +579,7 @@ boolean CKernel::Initialize (void)
 	if (bExpectNet)
 	{
 		char Now[48];
-		const boolean bTime = BareNetWaitForTime (8000);
+		const boolean bTime = BareNetWaitForTime (5000);
 		BareNetLocalTime (Now, sizeof Now);
 		Report ("hora: %s", bTime ? Now : "sin hora de red, DOS empieza en 1970");
 	}
@@ -587,6 +597,13 @@ boolean CKernel::Initialize (void)
 	}
 
 	Report ("core: init ok");
+
+	// How long the boot took from the kernel's start (the firmware's own part,
+	// before the kernel, is not counted: a stopwatch from power-on for that).
+	{
+		const unsigned nMillis = static_cast<unsigned> (BareMicros () / 1000);
+		Report ("arranque: %u,%u s desde el kernel", nMillis / 1000, nMillis % 1000 / 100);
+	}
 
 	// Every frame boundary inside DOSBox comes back to us here.
 	BareCoreSetFrameHook (FrameHook, this);

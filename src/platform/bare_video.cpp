@@ -31,6 +31,7 @@
 // (at your option) any later version.
 //
 #include "bare_env.h"
+#include "boot_logo.h"
 #include "frame_exchange.h"
 #include "scale_weights.h"
 
@@ -101,7 +102,13 @@ CCharGenerator s_Font;
 // one-line gap from the edge.  Fixed, so the position does not depend on the
 // source mode DOSBox happens to be in.
 const unsigned STATUS_X = 8;
-const unsigned STATUS_TOP = 8;
+// The first status line: below the boot logo (DrawBootLogo sets it).
+unsigned STATUS_TOP = 8;
+
+// The boot logo (boot_logo.h): at the top with the full boot log, in the
+// middle of the screen with a quiet one, like a BIOS's quiet boot.
+bool s_bLogoCentred = false;
+const char *s_pLogoCaption = "";
 const unsigned PanelMargin = 8;	// gap between the status line and the screen edge
 // No cap: the display is 1080 lines at 16+2 pixels per line, so there is room
 // for sixty.  The old cap of 24 was a guess that turned out to be exactly the
@@ -561,6 +568,69 @@ void DrawText (u32 *pDst, unsigned nPitch, unsigned nX, unsigned nY,
 			}
 		}
 	}
+}
+
+// The boot logo, decoded from its run-length rows straight into the frame
+// buffer at an integer scale (x2 at 720p, x3 at 1080p), centred across, at the
+// top or in the middle; the caption under it; and the status lines start
+// below.  Drawn whenever the boot screen is (re)started.
+void DrawBootLogo (void)
+{
+	if (s_pFrameBuffer == nullptr || !s_bStatusEnabled)
+	{
+		return;
+	}
+
+	unsigned nScale = s_nModeHeight / 300;
+	if (nScale < 1) nScale = 1;
+	if (nScale > 4) nScale = 4;
+	while (nScale > 1 && bootlogo::Width * nScale + 32 > s_nModeWidth)
+	{
+		nScale--;
+	}
+	const unsigned nW = bootlogo::Width * nScale;
+	const unsigned nH = bootlogo::Height * nScale;
+	if (nW + 16 > s_nModeWidth || nH + 64 > s_nModeHeight)
+	{
+		STATUS_TOP = 8;			// a screen too small for it: no logo
+		return;
+	}
+
+	const unsigned nCharH = s_Font.GetCharHeight ();
+	const unsigned nBlockH = nH + 12 + nCharH;
+	const unsigned nX = (s_nModeWidth - nW) / 2;
+	const unsigned nY = s_bLogoCentred ? (s_nModeHeight - nBlockH) / 3 : 16;
+
+	u32 *pDst = FrameBufferWords ();
+	const u32 nPitch = s_pFrameBuffer->GetPitch () / 4;
+
+	for (unsigned r = 0; r < bootlogo::Height; r++)
+	{
+		const unsigned char *pRun = bootlogo::Runs + bootlogo::RowOffset[r];
+		unsigned x = 0;
+		while (x < bootlogo::Width)
+		{
+			const unsigned nCount = pRun[0];
+			const u32 nColour = bootlogo::Palette[pRun[1]];
+			pRun += 2;
+			if (nColour != 0)		// black is the background
+			{
+				FillRect (pDst, nPitch, nX + x * nScale, nY + r * nScale,
+					  nCount * nScale, nScale, nColour);
+			}
+			x += nCount;
+		}
+	}
+
+	// The caption, centred under it.
+	const unsigned nCaptionW = static_cast<unsigned> (strlen (s_pLogoCaption)) * s_Font.GetCharWidth ();
+	if (nCaptionW != 0 && nCaptionW < s_nModeWidth)
+	{
+		DrawText (pDst, nPitch, (s_nModeWidth - nCaptionW) / 2, nY + nH + 12,
+			  s_pLogoCaption, 0x0055FFFF);
+	}
+
+	STATUS_TOP = nY + nBlockH + 20;
 }
 
 
@@ -1461,6 +1531,7 @@ void BareVideoStatusEnable (void)
 		s_bStatusEnabled = true;
 		s_bStatusScrolled = false;
 		s_nStatusCursor = 0;
+		DrawBootLogo ();
 	}
 }
 
@@ -1477,9 +1548,17 @@ void BareVideoStatusReset (void)
 	// the boot text in the last two boots.  The status column is the only map
 	// of what happened before the hang, so nothing here is allowed to throw it
 	// away.  If a future caller genuinely needs a blank screen, it wants
-	// BareVideoFill() and it should say why.
+	// BareVideoFill() and it should say why.  (Drawing the boot logo
+	// clears nothing either: it only paints its own pixels.)
 	s_nStatusCursor = 0;
 	s_bStatusScrolled = false;
+	DrawBootLogo ();
+}
+
+void BareVideoSetBootLogo (boolean bCentred, const char *pCaption)
+{
+	s_bLogoCentred = bCentred != FALSE;
+	s_pLogoCaption = pCaption != nullptr ? pCaption : "";
 }
 
 void BareVideoStatusPrint (const char *pText)

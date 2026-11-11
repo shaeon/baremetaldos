@@ -138,6 +138,11 @@ void    BareVideoStatus (unsigned nLine, const char *pText);
 ///\t   first line.
 void    BareVideoStatusReset (void);
 
+/// \brief The boot logo: centred on the screen (a quiet boot) or at the top
+///\t   (the full log under it), and the caption under it.  Before the boot
+///\t   screen is drawn; BareVideoStatusReset draws it.
+void    BareVideoSetBootLogo (boolean bCentred, const char *pCaption);
+
 /// \brief TRUE while the overlay is drawing (i.e. the emulator has not taken
 ///\t   the screen yet, or the watchdog has taken it back).
 boolean BareVideoStatusIsEnabled (void);

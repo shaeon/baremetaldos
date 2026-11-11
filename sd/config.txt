@@ -11,7 +11,19 @@
 # 64-bit mode.  Circle's AArch64 port needs this and the kernel load address.
 arm_64bit=1
 kernel_address=0x80000
+
+# initial_turbo stays at 0, although it is the usual trick for a faster boot:
+# while it lasts, the firmware keeps the ARM at its top clock and answers
+# clock requests without obeying them, and this port's governor takes that
+# for a firmware that refuses clock changes and switches itself off
+# (src/platform/bare_sysinfo.cpp).
 initial_turbo=0
+
+# A faster, cleaner boot: no rainbow square, and no pause before the kernel is
+# loaded (boot_delay's default is 1 second).  The BM-DOS logo comes up as soon
+# as the kernel runs.
+disable_splash=1
+boot_delay=0
 
 # Keep the GPU footprint small: the emulator is CPU bound and we only need a
 # framebuffer, not 3D or codecs.  64 MB is plenty for 1080p and leaves the rest

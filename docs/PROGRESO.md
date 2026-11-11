@@ -38,9 +38,10 @@ están en local y en el bundle, pendientes de push.
 | 2d78fd9 | Red 2: módem y null-modem (capa SDL_net sobre sockets de Circle) |
 | 357770d | Red 3: IPX sobre UDP |
 | 9cbffd3 | Menú: elegir red WiFi (--wrap de ReceiveScanResult, campo de texto, teclado ES/US) |
-| 533baea | **Encontrado sin conocer su origen** (intento interrumpido): WiFi encendido por defecto; espera NTP solo si hay red configurada. Revisado: correcto. **Pendiente de que el usuario confirme el cambio de comportamiento.** |
+| 533baea | **Encontrado sin conocer su origen** (intento interrumpido): WiFi encendido por defecto; espera NTP solo si hay red configurada. Revisado: correcto. **Confirmado por el usuario: WiFi siempre encendido.** |
 | (el de "net: the card's web server") | Red 4: servidor web de la tarjeta (encontrado a medias de un intento interrumpido, revisado, corregido el escapado en la página, terminado) |
 | (el de "fix: firmware calls from two cores, stdout off the screen...") | Fallos vistos en placa: carrera en el búfer del firmware de Circle (parche), stdout fuera de la pantalla, MIDI que perdía eventos sin consumo de audio |
+| (el de "boot: BIOS-style logo, no rainbow splash...") | Logo de arranque original, sin arcoíris (disable_splash), boot_delay=0, NTP 5 s máx., tiempo de arranque en pantalla |
 
 ## En curso
 
