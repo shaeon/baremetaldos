@@ -448,6 +448,18 @@ boolean BareNetSocketsReady (void);
 /// \brief "dd/mm/yyyy hh:mm:ss ZONE" in the configured zone, for the menu.
 void    BareNetLocalTime (char *pOut, unsigned nSize);
 
+/// A WiFi network wpa_supplicant's scans have seen (bare_net.cpp).
+struct TBareWiFiNetwork
+{
+	char SSID[33];
+	int nRSSI;		///< dBm, strongest access point with that name
+	boolean bSecure;	///< needs a password
+};
+
+/// \brief The networks seen so far, strongest first; at most nMax.  Only with
+///\t   network = wifi (the scans are wpa_supplicant's own).
+unsigned BareNetWiFiNetworks (TBareWiFiNetwork *pOut, unsigned nMax);
+
 // ---------------------------------------------------------------------------
 // Secondary cores - bare_cores.cpp
 // ---------------------------------------------------------------------------

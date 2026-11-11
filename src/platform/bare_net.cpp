@@ -292,3 +292,142 @@ void BareNetLocalTime (char *pOut, unsigned nSize)
 	localtime_r (&nNow, &Local);
 	strftime (pOut, nSize, "%d/%m/%Y %H:%M:%S %Z", &Local);
 }
+
+// ---------------------------------------------------------------------------
+// WiFi networks seen - for the menu's "Elegir red WiFi"
+// ---------------------------------------------------------------------------
+//
+// wpa_supplicant scans on its own (continuously while it has no network to
+// join, now and then otherwise), and its driver for Circle
+// (addon/wlan/hostap/src/drivers/driver_circle.cpp) collects the results with
+// CBcm4343Device::ReceiveScanResult().  A scan of our own would take results
+// away from it.  So the Makefile links with --wrap for that one function: every
+// call goes through __wrap_ below, which notes the networks in the buffer and
+// hands it on untouched.  Nothing in Circle is patched, and with the port's
+// code gone the wrap simply calls the real function.
+//
+// The two structures are copied verbatim from driver_circle.cpp, so that the
+// same compiler lays them out the same way.
+
+namespace {
+
+typedef u16 __le16;
+typedef u32 __le32;
+
+struct brcmf_bss_info_le
+{
+	__le32 version;
+	__le32 length;
+	u8 BSSID[6];
+	__le16 beacon_period;
+	__le16 capability;
+	u8 SSID_len;
+	u8 SSID[32];
+	struct {
+		__le32 count;
+		u8 rates[16];
+	} rateset;
+	__le16 chanspec;
+	__le16 atim_window;
+	u8 dtim_period;
+	__le16 RSSI;
+	s8 phy_noise;
+	u8 n_cap;
+	__le32 nbss_cap;
+	u8 ctl_ch;
+	__le32 reserved32[1];
+	u8 flags;
+	u8 reserved[3];
+	u8 basic_mcs[16];
+	__le16 ie_offset;
+	__le32 ie_length;
+	__le16 SNR;
+};
+
+struct brcmf_escan_result_le
+{
+	__le32 buflen;
+	__le32 version;
+	__le16 sync_id;
+	__le16 bss_count;
+	struct brcmf_bss_info_le bss_info_le;
+};
+
+constexpr unsigned MaxSeen = 24;
+TBareWiFiNetwork s_Seen[MaxSeen];
+unsigned s_nSeen = 0;
+
+void NoteNetwork (const brcmf_bss_info_le *pBSS)
+{
+	if (pBSS->SSID_len == 0 || pBSS->SSID_len > 32)
+	{
+		return;				// hidden network: no name to show
+	}
+	char SSID[33];
+	memcpy (SSID, pBSS->SSID, pBSS->SSID_len);
+	SSID[pBSS->SSID_len] = '\0';
+	const int nRSSI = static_cast<s16> (pBSS->RSSI);
+	const bool bSecure = (pBSS->capability & 0x0010) != 0;	// privacy bit
+
+	for (unsigned i = 0; i < s_nSeen; i++)
+	{
+		if (strcmp (s_Seen[i].SSID, SSID) == 0)
+		{
+			// Several access points with one name: keep the strongest.
+			if (nRSSI > s_Seen[i].nRSSI) s_Seen[i].nRSSI = nRSSI;
+			s_Seen[i].bSecure = s_Seen[i].bSecure || bSecure;
+			return;
+		}
+	}
+	if (s_nSeen < MaxSeen)
+	{
+		TBareWiFiNetwork &N = s_Seen[s_nSeen++];
+		snprintf (N.SSID, sizeof N.SSID, "%s", SSID);
+		N.nRSSI = nRSSI;
+		N.bSecure = bSecure;
+	}
+}
+
+} // namespace
+
+extern "C" boolean __real__ZN14CBcm4343Device17ReceiveScanResultEPvPj (CBcm4343Device *pThis,
+									  void *pBuffer, unsigned *pLength);
+
+extern "C" boolean __wrap__ZN14CBcm4343Device17ReceiveScanResultEPvPj (CBcm4343Device *pThis,
+									  void *pBuffer, unsigned *pLength)
+{
+	const boolean bGot = __real__ZN14CBcm4343Device17ReceiveScanResultEPvPj (pThis, pBuffer, pLength);
+	if (bGot && pBuffer != nullptr && pLength != nullptr && *pLength >= sizeof (brcmf_escan_result_le))
+	{
+		const auto *pResult = static_cast<const brcmf_escan_result_le *> (pBuffer);
+		const u8 *pEnd = static_cast<const u8 *> (pBuffer) + *pLength;
+		const brcmf_bss_info_le *pBSS = &pResult->bss_info_le;
+		for (unsigned i = 0; i < pResult->bss_count; i++)
+		{
+			if (reinterpret_cast<const u8 *> (pBSS) + sizeof *pBSS > pEnd || pBSS->length == 0)
+			{
+				break;			// a short or odd buffer: stop, do not guess
+			}
+			NoteNetwork (pBSS);
+			pBSS = reinterpret_cast<const brcmf_bss_info_le *> (reinterpret_cast<const u8 *> (pBSS) + pBSS->length);
+		}
+	}
+	return bGot;
+}
+
+unsigned BareNetWiFiNetworks (TBareWiFiNetwork *pOut, unsigned nMax)
+{
+	// Strongest first.
+	TBareWiFiNetwork Sorted[MaxSeen];
+	memcpy (Sorted, s_Seen, sizeof Sorted);
+	for (unsigned i = 1; i < s_nSeen; i++)
+	{
+		for (unsigned j = i; j > 0 && Sorted[j].nRSSI > Sorted[j - 1].nRSSI; j--)
+		{
+			const TBareWiFiNetwork t = Sorted[j]; Sorted[j] = Sorted[j - 1]; Sorted[j - 1] = t;
+		}
+	}
+	const unsigned n = s_nSeen < nMax ? s_nSeen : nMax;
+	memcpy (pOut, Sorted, n * sizeof *pOut);
+	return n;
+}

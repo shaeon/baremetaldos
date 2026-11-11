@@ -99,6 +99,7 @@ BareNetTimeValid
 BareNetWaitForTime
 BareNetSocketsReady
 BareNetLocalTime
+BareNetWiFiNetworks
 BareCorePaused
 BareCoreRunFrame
 BareCoreSetFrameHook

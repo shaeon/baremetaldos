@@ -1061,8 +1061,15 @@ REALPATH_OVERRIDE := 1
 # Rules.mk makes exactly this distinction (--section-start= for ld, -Wl, form
 # for clang), which is where the pattern comes from.
 LDFLAGS += --defsym=realpath=dosbox_realpath
+
 endif
 endif
+
+# The WiFi networks wpa_supplicant's scans see, for the setup menu: every call
+# its Circle driver makes to CBcm4343Device::ReceiveScanResult() goes through
+# bare_net.cpp's __wrap_ function, which notes them and passes the buffer on.
+# Linker-level, so nothing in Circle (or its hostap submodule) is patched.
+LDFLAGS += --wrap=_ZN14CBcm4343Device17ReceiveScanResultEPvPj
 
 # Circle's clean recipe does "rm -f *.o *.elf ... $(EXTRACLEAN)".  Our objects
 # live in build/, so list them explicitly: rm -f cannot remove a directory, and
@@ -1344,6 +1351,9 @@ check-menu:
 	@$(HOST_CXX) -std=gnu++23 -O1 -Wall -Wextra -Wpedantic -Wshadow \
 		-o build/menu_test scripts/hostcheck/menu_test.cpp
 	@build/menu_test
+	@$(HOST_CXX) -std=gnu++23 -O1 -Wall -Wextra -Wpedantic -Wshadow -Iscripts/hostcheck \
+		-o build/menu_keymap_test scripts/hostcheck/menu_keymap_test.cpp
+	@build/menu_keymap_test
 
 # Which source rows make each output row (scale_weights.h): sharp/smooth.
 .PHONY: check-scale

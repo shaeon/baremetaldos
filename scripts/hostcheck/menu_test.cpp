@@ -147,6 +147,41 @@ int main (void)
 		Check (bTitle && bOpt, "the dialog is drawn over the page with its title and options");
 	}
 
+	std::printf ("text input\n");
+	{
+		CMenu T;
+		TPage P; P.Title = "Red"; P.Items = { Action ("Elegir red", 1) };
+		T.Pages = { P }; T.Refresh ();
+		T.OpenInput (5, "Contraseña", "Contraseña de \"Casa\":", "", true, 8, 63);
+		Check (T.InputOpen () && T.DialogOpen (), "an input box opens and takes the keys");
+		for (char c : std::string ("clave1")) T.Char (static_cast<unsigned char> (c));
+		Check (T.Key (TKey::Enter).Kind == TEventKind::None && T.InputOpen (),
+		       "Enter does nothing below the minimum length (8 for a WPA password)");
+		T.Char (0xF1);			// ñ
+		T.Char ('Z');
+		T.Key (TKey::Backspace);	// takes 'Z' out
+		T.Char ('9');
+		CScreen U; T.Render (U);
+		bool bStars = false;
+		for (unsigned y = 0; y < Rows; y++) bStars = bStars || Contains (U.RowText (y), "********_");
+		Check (bStars, "a hidden field shows one '*' per character");
+		T.Key (TKey::Tab);
+		CScreen V; T.Render (V);
+		bool bClear = false;
+		for (unsigned y = 0; y < Rows; y++) bClear = bClear || Contains (V.RowText (y), "clave1ñ9_");
+		Check (bClear, "Tab shows it; Backspace removed one character, a two-byte one counts as one");
+		TEvent Ev = T.Key (TKey::Enter);
+		Check (Ev.Kind == TEventKind::Input && Ev.nId == 5 && Ev.Text == "clave1ñ9" && !T.InputOpen (),
+		       "Enter returns the text");
+		T.OpenInput (6, "Red", "Nombre:", "Ca", false, 1, 4);
+		for (char c : std::string ("sa123")) T.Char (static_cast<unsigned char> (c));
+		Ev = T.Key (TKey::Enter);
+		Check (Ev.Text == "Casa", "no more than the maximum length goes in");
+		T.OpenInput (7, "Red", "Nombre:", "x", false, 1, 32);
+		Ev = T.Key (TKey::Escape);
+		Check (Ev.Kind == TEventKind::Input && Ev.bCancelled, "Esc cancels the input");
+	}
+
 	std::printf ("scrolling and wrapping\n");
 	{
 		CMenu L;

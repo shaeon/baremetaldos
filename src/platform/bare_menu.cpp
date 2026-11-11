@@ -25,6 +25,7 @@
 #include "menu_model.h"
 #include "menu_render.h"
 #include "conf_edit.h"
+#include "menu_keymap.h"
 
 #include <circle/font.h>
 #include <circle/logger.h>
@@ -103,6 +104,10 @@ enum TActionId
 	ActCDEject,
 	ActBootGame,
 	ActBootPrompt,
+	ActWiFiList,
+	ActWiFiManual,
+	ActWiFiRescan,
+	ActWiFiEntry = 20000,		// + index into the list
 	ActBrowseUp,
 	ActBrowsePick,			// "elegir esta carpeta"
 	ActBrowseEntry = 10000,		// + index into the listing
@@ -166,7 +171,26 @@ enum TDialogId
 	DlgDefaults,		// F9: Sí / No
 	DlgRestartNow,		// after saving B settings: Reiniciar ahora / Más tarde
 	DlgSaveFailed,		// Aceptar
+	DlgInfo,		// Aceptar, nothing to do after it
+	InWiFiPassword = 50,	// text input: the password of s_WiFiSSID
+	InWiFiSSID,		// text input: a network's name, typed
 };
+
+// --- choosing a WiFi network -------------------------------------------------
+//
+// The networks wpa_supplicant has seen (bare_net.cpp, BareNetWiFiNetworks), a
+// password typed in an input box, and SD:/wpa_supplicant.conf written with
+// them.  The file is written at once - it is the WiFi's own file, not a
+// setting the menu keeps pending - and the connection is made at the next
+// boot, by wpa_supplicant reading it.
+bool s_bWiFiList = false;
+std::vector<TBareWiFiNetwork> s_WiFiNetworks;
+std::string s_WiFiSSID;			// the network being joined
+bool s_bWiFiSecure = true;
+
+// Modifier keys, for typing (menu_keymap.h): Shift and AltGr (right Alt).
+bool s_bShift = false;
+bool s_bAltGr = false;
 
 // --- settings: what the menu can change, and where it is kept ------------------------
 //
@@ -252,6 +276,7 @@ enum TSettingId
 	SetNetwork = 700,
 	SetNetIP,
 	SetTimeZone,
+	SetWiFiCountry,			// wpa_supplicant.conf country=
 	SetSerial1,
 	SetSerial2,
 	SetIPX,
@@ -643,6 +668,15 @@ void DefineSettings (void)
 		TApply::RestartBoard,
 		{ { "Ninguna", "off" }, { "Ethernet", "ethernet" }, { "WiFi", "wifi" } }, 0, nullptr });
 
+	s_Settings.push_back ({ SetWiFiCountry, FileBoot, "", "", "País del WiFi",
+		"Decide qué canales puede usar el WiFi (en Europa, del 1 al 13). Se escribe en "
+		"wpa_supplicant.conf al elegir una red.",
+		TApply::RestartBoard,
+		{ { "España", "ES" }, { "Portugal", "PT" }, { "México", "MX" }, { "Argentina", "AR" },
+		  { "Colombia", "CO" }, { "Chile", "CL" }, { "Perú", "PE" }, { "EE. UU.", "US" },
+		  { "Reino Unido", "GB" }, { "Francia", "FR" }, { "Alemania", "DE" }, { "Italia", "IT" } },
+		0, nullptr });
+
 	s_Settings.push_back ({ SetTimeZone, FileBoot, "", "timezone", "Zona horaria",
 		"La hora de DOS: la de la red (NTP) en esta zona, con el cambio de verano. DOS "
 		"la toma al arrancar, así que se aplica al reiniciar. Otra zona se escribe en "
@@ -862,6 +896,22 @@ void LoadSettings (void)
 		{
 			bFound = bareconf::CmdlineGet (Cmdline, S.pKey, &Value);
 		}
+		else if (S.nId == SetWiFiCountry)
+		{
+			std::string WPA;
+			ReadText ("SD:/wpa_supplicant.conf", &WPA);
+			const size_t n = WPA.find ("country=");
+			if (n != std::string::npos)
+			{
+				Value = bareconf::Trim (WPA.substr (n + 8, 2));
+				bFound = true;
+			}
+			// Upper case is how it is written: compare as such.
+			for (unsigned i = 0; i < S.Choices.size (); i++)
+				if (S.Choices[i].Value == Value) { S.nSaved = S.nPending = i; }
+			if (!bFound) S.nSaved = S.nPending = S.nDefault;
+			continue;
+		}
 		else if (S.nId == SetKeyb)
 		{
 			Value = NormaliseWords (bareconf::GetCommand (DOSBoxConf, "keyb"));
@@ -1049,6 +1099,7 @@ bool SaveSettings (void)
 		{
 			if (S.nPending == S.nSaved) continue;
 			if (S.nId == SetDisplay) Conf.Set ("", "display", S.Choices[S.nPending].Value);
+			else if (S.nId == SetWiFiCountry) continue;	// lives in wpa_supplicant.conf
 			else if (S.File == FileBoot) Conf.Set (S.pSection, S.pKey, S.Choices[S.nPending].Value);
 			if (S.nId == SetNetIP && !s_NetCurrentChoice.empty ()
 			    && S.Choices[S.nPending].Value == s_NetCurrentChoice)
@@ -1313,6 +1364,119 @@ TPage PageSalir (void)
 	return P;
 }
 
+// --- WiFi --------------------------------------------------------------------------
+
+void BuildPages (void);
+
+constexpr unsigned PageIndexRed = 7;		// ..., Rendimiento, Red, Arranque, Salir
+
+bool WiFiTextOk (const std::string &Text)
+{
+	// wpa_supplicant's quoted strings: no quote, no line end, no backslash
+	// games.  Everything else (spaces, accents, symbols) is fine.
+	return Text.find_first_of ("\"\\\r\n") == std::string::npos;
+}
+
+bool WriteWiFiConfig (const std::string &SSID, const std::string &Password, bool bSecure)
+{
+	const TSetting *pCountry = FindSetting (SetWiFiCountry);
+	const std::string Country = pCountry->Choices[pCountry->nPending].Value;
+
+	std::string Text =
+		"# wpa_supplicant.conf - written by the BM-DOS setup menu (Win+F12, Red).\n"
+		"# The WiFi network the board joins with boot.conf network = wifi.  It can\n"
+		"# also be edited by hand on a PC; the menu rewrites it when a network is\n"
+		"# chosen there.\n"
+		"\n"
+		"country=" + Country + "\n"
+		"\n"
+		"network={\n"
+		"\tssid=\"" + SSID + "\"\n";
+	if (bSecure)
+	{
+		Text += "\tpsk=\"" + Password + "\"\n"
+			"\tproto=RSN WPA\n"
+			"\tkey_mgmt=WPA-PSK\n";
+	}
+	else
+	{
+		Text += "\tkey_mgmt=NONE\n";
+	}
+	Text += "}\n";
+	return WriteText ("SD:/wpa_supplicant.conf", Text);
+}
+
+void WiFiJoin (const std::string &Password)
+{
+	if (!WiFiTextOk (s_WiFiSSID) || !WiFiTextOk (Password))
+	{
+		s_Menu.OpenDialog (DlgInfo, "No se puede guardar",
+				   "El nombre o la contraseña tienen comillas (\") o barras invertidas (\\), "
+				   "que wpa_supplicant.conf no admite así. Edítalo en el PC.", { "Aceptar" });
+		return;
+	}
+	if (!WriteWiFiConfig (s_WiFiSSID, Password, s_bWiFiSecure))
+	{
+		s_Menu.OpenDialog (DlgSaveFailed, "No se pudo guardar",
+				   "No se pudo escribir SD:/wpa_supplicant.conf en la tarjeta.", { "Aceptar" });
+		return;
+	}
+
+	// The connection itself: WiFi on, and a restart.
+	TSetting *pNet = FindSetting (SetNetwork);
+	for (unsigned i = 0; i < pNet->Choices.size (); i++)
+	{
+		if (pNet->Choices[i].Value == "wifi") pNet->nPending = i;
+	}
+	s_bWiFiList = false;
+	BuildPages ();
+	s_Menu.GoToPage (PageIndexRed);
+	s_Menu.OpenDialog (DlgInfo, "Red WiFi guardada",
+			   "Guardada \"" + s_WiFiSSID + "\" en wpa_supplicant.conf. Guarda con F10 (la "
+			   "conexión queda en WiFi) y reinicia: la placa se conectará al arrancar.",
+			   { "Aceptar" });
+}
+
+TPage PageWiFi (void)
+{
+	TPage P;
+	P.Title = "Elegir red WiFi";
+	P.Help = "Las redes que ha encontrado el WiFi de la placa. Esc vuelve a Red.";
+
+	s_WiFiNetworks.resize (24);
+	s_WiFiNetworks.resize (BareNetWiFiNetworks (s_WiFiNetworks.data (), 24));
+
+	P.Items.push_back (Section ("Redes encontradas"));
+	if (BareNetMode () != BareNetWiFi)
+	{
+		P.Items.push_back (Info ("(el WiFi está apagado)", "",
+			"Para buscar redes el WiFi tiene que estar encendido: pon Conexión en WiFi, "
+			"guarda y reinicia; aunque no haya ninguna red configurada, la placa busca "
+			"las que tiene alrededor. Mientras, puedes escribir el nombre a mano."));
+	}
+	else if (s_WiFiNetworks.empty ())
+	{
+		P.Items.push_back (Info ("(ninguna todavía)", "",
+			"El WiFi busca cada pocos segundos. Usa \"Buscar de nuevo\" en un momento."));
+	}
+	for (size_t i = 0; i < s_WiFiNetworks.size (); i++)
+	{
+		const TBareWiFiNetwork &N = s_WiFiNetworks[i];
+		const int nRSSI = N.nRSSI;
+		const char *pBars = nRSSI >= -55 ? "||||" : nRSSI >= -67 ? "|||." : nRSSI >= -75 ? "||.." : "|...";
+		TItem Item = Action (N.SSID, ActWiFiEntry + static_cast<int> (i),
+			N.bSecure ? "Intro: escribir la contraseña de esta red."
+				  : "Red abierta, sin contraseña. Intro: elegirla.");
+		Item.Value = Format ("%s %d dBm %s", pBars, nRSSI, N.bSecure ? "clave" : "abierta");
+		P.Items.push_back (Item);
+	}
+	P.Items.push_back (Section (""));
+	P.Items.push_back (Action ("Buscar de nuevo", ActWiFiRescan, "Actualiza la lista."));
+	P.Items.push_back (Action ("Escribir el nombre a mano", ActWiFiManual,
+		"Para una red oculta, o si aún no aparece en la lista."));
+	return P;
+}
+
 // --- browser ---------------------------------------------------------------------
 
 bool BrowseWants (const std::string &Name, bool bFolder)
@@ -1485,6 +1649,13 @@ TPage PageUnidades (void)
 
 void BuildPages (void)
 {
+	if (s_bWiFiList)
+	{
+		s_Menu.Pages = { PageWiFi () };
+		s_Menu.Refresh ();
+		return;
+	}
+
 	if (s_Browse != TBrowse::None)
 	{
 		s_Menu.Pages = { PageBrowser () };
@@ -1663,8 +1834,11 @@ void BuildPages (void)
 			Section ("La placa"),
 			SettingItem (*FindSetting (SetNetwork)),
 			SettingItem (*FindSetting (SetNetIP)),
-			Info ("Red WiFi", SSID, "La red de SD:/wpa_supplicant.conf. Se edita en el PC "
-			      "por ahora; elegirla desde aquí llega en el paso siguiente."),
+			Info ("Red WiFi", SSID, "La red de SD:/wpa_supplicant.conf."),
+			Action ("Elegir red WiFi", ActWiFiList,
+				"Las redes que ve la placa, de la más fuerte a la más débil; eliges una y "
+				"escribes su contraseña. Se guarda en wpa_supplicant.conf."),
+			SettingItem (*FindSetting (SetWiFiCountry)),
 			Section ("Estado"),
 			Info ("Estado", BareNetState ()),
 			Info ("Dirección", Or (Net.IP)),
@@ -1683,7 +1857,6 @@ void BuildPages (void)
 			Section ("Juego en red"),
 			SettingItem (*FindSetting (SetIPX)),
 			Section ("Próximamente"),
-			Planned ("Elegir red WiFi", "Buscar redes y escribir la contraseña desde aquí."),
 			Planned ("Servidor web de la tarjeta", "Copiar juegos desde el navegador del PC.",
 				 TApply::RestartBoard),
 		};
@@ -1756,6 +1929,8 @@ bool MapKey (unsigned nRetroKey, TKey *pKey)
 	case RETROK_F1:		*pKey = TKey::F1; return true;
 	case RETROK_F9:		*pKey = TKey::F9; return true;
 	case RETROK_F10:	*pKey = TKey::F10; return true;
+	case RETROK_BACKSPACE:	*pKey = TKey::Backspace; return true;
+	case RETROK_TAB:	*pKey = TKey::Tab; return true;
 
 	// + and -: the keypad, the US positions, the Spanish positions (the keys
 	// under ']' and '/' on a US map), and F5/F6 as on many BIOS setups.
@@ -1912,8 +2087,77 @@ void HandleBrowse (int nId)
 	Insert (BrowseJoin (Entry.first), s_Browse == TBrowse::Floppy);
 }
 
+void HandleWiFi (const TEvent &Ev)
+{
+	if (Ev.Kind == TEventKind::Close)
+	{
+		s_bWiFiList = false;
+		BuildPages ();
+		s_Menu.GoToPage (PageIndexRed);
+		return;
+	}
+	if (Ev.Kind != TEventKind::Action) return;
+
+	if (Ev.nId == ActWiFiRescan)
+	{
+		BuildPages ();
+		return;
+	}
+	if (Ev.nId == ActWiFiManual)
+	{
+		s_Menu.OpenInput (InWiFiSSID, "Red WiFi", "Nombre de la red (SSID):", "", false, 1, 32);
+		return;
+	}
+	const size_t i = static_cast<size_t> (Ev.nId - ActWiFiEntry);
+	if (i >= s_WiFiNetworks.size ()) return;
+	s_WiFiSSID = s_WiFiNetworks[i].SSID;
+	s_bWiFiSecure = s_WiFiNetworks[i].bSecure;
+	if (s_bWiFiSecure)
+	{
+		s_Menu.OpenInput (InWiFiPassword, "Contraseña", "Contraseña de \"" + s_WiFiSSID + "\":",
+				  "", true, 8, 63);
+	}
+	else
+	{
+		WiFiJoin ("");
+	}
+}
+
 void HandleEvent (const TEvent &Ev)
 {
+	// Text typed in an input box: a WiFi name or password.
+	if (Ev.Kind == TEventKind::Input)
+	{
+		if (Ev.bCancelled) return;
+		if (Ev.nId == InWiFiSSID)
+		{
+			s_WiFiSSID = Ev.Text;
+			s_bWiFiSecure = true;
+			s_Menu.OpenInput (InWiFiPassword, "Contraseña",
+					  "Contraseña de \"" + s_WiFiSSID + "\" (vacía si es abierta):",
+					  "", true, 0, 63);
+			return;
+		}
+		if (Ev.nId == InWiFiPassword)
+		{
+			if (Ev.Text.empty ()) s_bWiFiSecure = false;
+			else if (Ev.Text.size () < 8)
+			{
+				s_Menu.OpenDialog (DlgInfo, "Contraseña corta",
+						   "Una contraseña WPA tiene entre 8 y 63 caracteres.", { "Aceptar" });
+				return;
+			}
+			WiFiJoin (Ev.Text);
+		}
+		return;
+	}
+
+	if (s_bWiFiList)
+	{
+		HandleWiFi (Ev);
+		return;
+	}
+
 	// The browser is a screen of its own: Esc leaves it, not the menu, and
 	// its entries are actions of their own.
 	if (s_Browse != TBrowse::None)
@@ -1959,12 +2203,17 @@ void HandleEvent (const TEvent &Ev)
 		case ActSave:		SaveAndLeave (false); break;
 		case ActSaveRestart:	SaveAndLeave (true); break;
 		case ActDiscard:	Discard (); Close (); break;
-		case ActDefaults:	HandleEvent (TEvent { TEventKind::Defaults }); break;
+		case ActDefaults:	{ TEvent Defaults; Defaults.Kind = TEventKind::Defaults; HandleEvent (Defaults); } break;
 		case ActDriveC:
 			BrowseStart (TBrowse::FolderC, s_DriveC.Pending.empty () ? "/dos" : s_DriveC.Pending);
 			break;
 		case ActDriveE:
 			BrowseStart (TBrowse::FolderE, s_DriveE.Pending.empty () ? "/" : s_DriveE.Pending);
+			break;
+		case ActWiFiList:
+			s_bWiFiList = true;
+			BuildPages ();
+			s_Menu.GoToPage (0);
 			break;
 		case ActBootGame:
 		{
@@ -2204,6 +2453,35 @@ void BareMenuTick (void)
 		}
 		const TKeyEvent Ev = s_KeyRing[nTail % KeyRingSize];
 		s_nKeyTail.store (nTail + 1, std::memory_order_release);
+
+		// Modifiers, for typing in an input box.
+		if (Ev.nKey == RETROK_LSHIFT || Ev.nKey == RETROK_RSHIFT)
+		{
+			s_bShift = Ev.bDown;
+			continue;
+		}
+		if (Ev.nKey == RETROK_RALT || Ev.nKey == RETROK_MODE)
+		{
+			s_bAltGr = Ev.bDown;
+			continue;
+		}
+
+		// An input box takes characters first; the keys that edit it
+		// (Backspace, Tab, Enter, Esc) go through the usual mapping below.
+		if (s_Menu.InputOpen () && Ev.bDown)
+		{
+			const TSetting *pKeyb = FindSetting (SetKeyb);
+			const std::string &Layout = pKeyb != nullptr ? pKeyb->Choices[pKeyb->nPending].Value : "";
+			const TLayout L = Layout.rfind ("es", 0) == 0 || Layout.rfind ("la", 0) == 0
+					  ? TLayout::Spanish : TLayout::US;
+			const std::uint32_t c = KeyToChar (Ev.nKey, s_bShift, s_bAltGr, L);
+			if (c != 0)
+			{
+				s_Menu.Char (c);
+				s_bDirty = true;
+				continue;
+			}
+		}
 
 		TKey Key;
 		if (!MapKey (Ev.nKey, &Key))

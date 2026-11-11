@@ -186,17 +186,33 @@ struct TPage
 enum class TKey
 {
 	Up, Down, Left, Right, PageUp, PageDown, Home, End,
-	Enter, Escape, Plus, Minus, F1, F9, F10
+	Enter, Escape, Plus, Minus, F1, F9, F10,
+	Backspace, Tab
 };
 
-enum class TEventKind { None, Close, Action, Changed, SaveAndExit, Defaults, Dialog };
+enum class TEventKind { None, Close, Action, Changed, SaveAndExit, Defaults, Dialog, Input };
 
 struct TEvent
 {
 	TEventKind Kind = TEventKind::None;
 	int nId = 0;			// Action / Changed / Dialog: the item's or dialog's id
 	unsigned nChoice = 0;		// Changed: the new choice; Dialog: the option
-	bool bCancelled = false;	// Dialog: closed with Esc
+	bool bCancelled = false;	// Dialog / Input: closed with Esc
+	std::string Text;		// Input: what was typed
+};
+
+// A line of text typed in a box over the page: a WiFi network's name, its
+// password.  Printable characters go in (CMenu::Char), Backspace takes the
+// last one out, Tab shows or hides a hidden one, Enter accepts, Esc cancels.
+struct TInput
+{
+	int nId = 0;
+	std::string Title;
+	std::string Prompt;
+	std::string Text;		// UTF-8
+	bool bHidden = false;		// shown as '*' (Tab toggles)
+	unsigned nMax = 63;		// characters
+	unsigned nMin = 0;		// Enter does nothing below this
 };
 
 // A question in a box over the page, as a BIOS asks "Save to CMOS and EXIT
@@ -241,7 +257,24 @@ public:
 		m_bDialog = !Options.empty ();
 	}
 
-	bool DialogOpen (void) const { return m_bDialog; }
+	bool DialogOpen (void) const { return m_bDialog || m_bInput; }
+
+	void OpenInput (int nId, const std::string &Title, const std::string &Prompt,
+			const std::string &Initial, bool bHidden, unsigned nMin, unsigned nMax)
+	{
+		m_Input = TInput { nId, Title, Prompt, Initial, bHidden, nMax, nMin };
+		m_bInput = true;
+	}
+
+	bool InputOpen (void) const { return m_bInput; }
+
+	/// A typed character (a Unicode code point), for an open input box.
+	void Char (std::uint32_t cp)
+	{
+		if (!m_bInput || cp < 0x20 || cp == 0x7F) return;
+		if (CScreen::Length (m_Input.Text) >= m_Input.nMax) return;
+		CScreen::Encode (m_Input.Text, cp);
+	}
 
 	/// Show a page (and its first option), e.g. coming back from a sub-screen.
 	void GoToPage (unsigned nPage)
@@ -269,6 +302,39 @@ public:
 	TEvent Key (TKey Key)
 	{
 		TEvent Ev;
+
+		if (m_bInput)
+		{
+			switch (Key)
+			{
+			case TKey::Backspace:
+				if (!m_Input.Text.empty ())
+				{
+					// Back over one UTF-8 character.
+					size_t n = m_Input.Text.size () - 1;
+					while (n > 0 && (static_cast<unsigned char> (m_Input.Text[n]) & 0xC0) == 0x80) n--;
+					m_Input.Text.erase (n);
+				}
+				break;
+			case TKey::Tab:
+				m_Input.bHidden = !m_Input.bHidden;
+				break;
+			case TKey::Enter:
+				if (CScreen::Length (m_Input.Text) >= m_Input.nMin)
+				{
+					m_bInput = false;
+					Ev.Kind = TEventKind::Input; Ev.nId = m_Input.nId; Ev.Text = m_Input.Text;
+				}
+				break;
+			case TKey::Escape:
+				m_bInput = false;
+				Ev.Kind = TEventKind::Input; Ev.nId = m_Input.nId; Ev.bCancelled = true;
+				break;
+			default:
+				break;
+			}
+			return Ev;
+		}
 
 		if (m_bDialog)
 		{
@@ -309,6 +375,8 @@ public:
 		case TKey::F10:		Ev.Kind = TEventKind::SaveAndExit; break;
 		case TKey::F9:		Ev.Kind = TEventKind::Defaults; break;
 		case TKey::F1:		break;		// the help pane is always shown
+		case TKey::Backspace:
+		case TKey::Tab:		break;		// only for an input box
 
 		case TKey::Enter:
 		case TKey::Plus:
@@ -400,6 +468,10 @@ public:
 		{
 			RenderDialog (S);
 		}
+		if (m_bInput)
+		{
+			RenderInput (S);
+		}
 	}
 
 	/// Word wrap into a box; returns rows used.
@@ -438,6 +510,57 @@ private:
 	unsigned m_nSel = 0;
 	TDialog m_Dialog;
 	bool m_bDialog = false;
+	TInput m_Input;
+	bool m_bInput = false;
+
+	void RenderInput (CScreen &S) const
+	{
+		const unsigned w = 64, h = 9;
+		const unsigned x = (Cols - w) / 2, y = (Rows - h) / 2;
+
+		S.Fill (x + 1, y + 1, w, h, Black, Black);		// shadow
+		S.Fill (x, y, w, h, White, Blue);
+		S.HLine (x, y, w);
+		S.HLine (x, y + h - 1, w);
+		S.VLine (x, y, h);
+		S.VLine (x + w - 1, y, h);
+		const std::string Title = " " + m_Input.Title + " ";
+		S.Put (x + (w - CScreen::Length (Title)) / 2, y, Title, Yellow, Blue);
+
+		S.Put (x + 2, y + 2, m_Input.Prompt, White, Blue, w - 4);
+
+		// The field: the end of the text if it is longer than the box.
+		const unsigned nField = w - 6;
+		std::string Shown;
+		if (m_Input.bHidden)
+		{
+			Shown.assign (CScreen::Length (m_Input.Text), '*');
+		}
+		else
+		{
+			Shown = m_Input.Text;
+		}
+		const unsigned nLen = CScreen::Length (Shown);
+		if (nLen >= nField)
+		{
+			size_t i = 0;
+			for (unsigned nSkip = nLen - nField + 1; nSkip > 0; nSkip--) CScreen::Decode (Shown, i);
+			Shown = Shown.substr (i);
+		}
+		S.Fill (x + 3, y + 4, nField, 1, Black, LightGrey);
+		const unsigned n = S.Put (x + 3, y + 4, Shown, Black, LightGrey, nField);
+		S.Put (x + 3 + n, y + 4, "_", Blue, LightGrey);
+
+		S.Put (x + 2, y + 6, Format2 (m_Input), LightCyan, Blue, w - 4);
+	}
+
+	static std::string Format2 (const TInput &In)
+	{
+		std::string s = "Intro: aceptar   Esc: cancelar";
+		if (In.bHidden) s += "   Tab: mostrar";
+		else s += "   Tab: ocultar";
+		return s;
+	}
 
 	void RenderDialog (CScreen &S) const
 	{
