@@ -242,6 +242,25 @@ if [ -f "$FIRMWARE_SRC/bcm2712d0.dtbo" ]; then
 	cp "$FIRMWARE_SRC/bcm2712d0.dtbo" "$STAGE/overlays/"
 fi
 
+# WiFi (boot.conf network = wifi): the chip's firmware in /firmware, fetched
+# by Circle's addon/wlan/firmware makefile from the Raspberry Pi firmware-nonfree
+# repository, and a wpa_supplicant.conf template for the network and password.
+# Not fatal: without them the card boots, and WiFi says what is missing.
+WLAN_FIRMWARE="$REPO_ROOT/third_party/circle-stdlib/libs/circle/addon/wlan/firmware"
+say "Fetching the WiFi firmware"
+if make -C "$WLAN_FIRMWARE" >/dev/null 2>&1; then
+	mkdir -p "$STAGE/firmware"
+	for f in "$WLAN_FIRMWARE"/*.bin "$WLAN_FIRMWARE"/*.txt "$WLAN_FIRMWARE"/*.clm_blob; do
+		[ -f "$f" ] && cp "$f" "$STAGE/firmware/"
+	done
+	echo "  firmware: $(ls "$STAGE/firmware" | wc -l) files for the WiFi chips"
+else
+	echo "  WARNING: could not fetch the WiFi firmware; WiFi will not start" >&2
+fi
+if [ ! -f "$STAGE/wpa_supplicant.conf" ]; then
+	cp "$REPO_ROOT/sd/wpa_supplicant.conf" "$STAGE/wpa_supplicant.conf"
+fi
+
 # A README on the card, because in six months you will not remember which
 # directory is mounted as C:.
 cat > "$STAGE/LEEME.txt" <<'EOF'

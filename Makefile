@@ -596,6 +596,7 @@ APP_SRCS := \
 	src/platform/bare_dynarec.cpp \
 	src/platform/bare_cores.cpp \
 	src/platform/bare_menu.cpp \
+	src/platform/bare_net.cpp \
 	src/platform/bare_midi.cpp \
 	src/dosbox-stub/midi_stub.cpp \
 	src/dosbox-stub/posix_stubs.cpp
@@ -1001,7 +1002,13 @@ $(foreach src,$(DOSBOX_C_SRCS) $(LIBRETRO_COMMON_SRCS),$(eval $(call DOSBOX_C_OB
 # lib/sound is built by Circle's own makeall ("cd sound"), it is simply missing
 # from the variable.  Appended at the end for readability: Rules.mk wraps all of
 # $(LIBS) in --start-group/--end-group, so link order does not matter here.
-LIBS := $(CIRCLE_STDLIB_LIBS) $(CIRCLEHOME)/lib/sound/libsound.a $(BARE_MIDI_LIBS)
+# The board's network (bare_net.cpp): libnet comes with circle-stdlib's list;
+# WiFi adds Circle's WLAN driver and its wpa_supplicant, both built by
+# circle-stdlib's setup along with the rest of Circle.
+BARE_NET_LIBS := $(CIRCLEHOME)/addon/wlan/hostap/wpa_supplicant/libwpa_supplicant.a \
+		 $(CIRCLEHOME)/addon/wlan/libwlan.a
+
+LIBS := $(CIRCLE_STDLIB_LIBS) $(CIRCLEHOME)/lib/sound/libsound.a $(BARE_MIDI_LIBS) $(BARE_NET_LIBS)
 
 # ---------------------------------------------------------------------------
 # Overriding a libgloss stub that returns ENOSYS

@@ -395,6 +395,60 @@ struct TBareVideoPresenterStats
 void    BareVideoPresenterStats (TBareVideoPresenterStats *pStats);
 
 // ---------------------------------------------------------------------------
+// The board's network - bare_net.cpp (Ethernet or WiFi, Circle's TCP/IP)
+// ---------------------------------------------------------------------------
+
+enum TBareNetMode { BareNetOff, BareNetEthernet, BareNetWiFi };
+
+struct TBareNetConfig
+{
+	TBareNetMode Mode;
+	const char *pHostname;
+	boolean bDHCP;
+	u8 IP[4], Mask[4], Gateway[4], DNS[4];	// with bDHCP FALSE
+};
+
+struct TBareNetInfo
+{
+	char IP[16], Mask[16], Gateway[16], DNS[16];	// "" until there is an address
+	char MAC[18];
+	char Hostname[32];
+};
+
+/// \brief Start the network from boot.conf, without waiting for the link: the
+///\t   WiFi association and DHCP finish while DOS runs.  FALSE if it could not
+///\t   start (BareNetState says why).  Off returns TRUE at once.
+boolean BareNetInit (const TBareNetConfig *pConfig);
+TBareNetMode BareNetMode (void);
+
+/// \brief Connected and with an address.
+boolean BareNetReady (void);
+
+/// \brief One line, in Spanish, for the menu: "apagada", "WiFi: conectando con
+///\t   la red", "esperando dirección (DHCP)", "conectada", or what failed.
+const char *BareNetState (void);
+void    BareNetInfo (TBareNetInfo *pInfo);
+
+/// \brief The time zone for DOS's clock, as a POSIX TZ rule
+///\t   ("CET-1CEST,M3.5.0,M10.5.0/3").  Before DOSBox starts: its BIOS reads
+///\t   the local time once.
+void    BareNetSetTimeZone (const char *pPosixTZ);
+
+/// \brief Circle's clock holds a real time (NTP answered; the board has no clock).
+boolean BareNetTimeValid (void);
+
+/// \brief Wait (yielding to the network's tasks) until NTP has set the clock, at
+///\t   most nMaxMillis.  TRUE if the time is valid.  Returns at once with the
+///\t   network off or failed.
+boolean BareNetWaitForTime (unsigned nMaxMillis);
+
+/// \brief The network is up and circle-newlib's BSD sockets can be used.
+boolean BareNetSocketsReady (void);
+
+/// \brief "dd/mm/yyyy hh:mm:ss ZONE" in the configured zone, for the menu.
+void    BareNetLocalTime (char *pOut, unsigned nSize);
+
+// ---------------------------------------------------------------------------
 // Secondary cores - bare_cores.cpp
 // ---------------------------------------------------------------------------
 

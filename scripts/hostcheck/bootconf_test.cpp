@@ -177,6 +177,9 @@ static const TAudioCase AudioCases[] =
 	{ "raton: velocidad fuera de rango", "mouse_speed = 1000\n", false, 100, 100, "mouse_speed" },
 	{ "setup: sin espera", "setup_wait = 0\n", false, 100, 100, nullptr },
 	{ "setup: espera fuera de rango", "setup_wait = 9\n", false, 100, 100, "setup_wait" },
+	{ "hora: zona de Espana", "timezone = CET-1CEST,M3.5.0,M10.5.0/3\n", false, 100, 100, nullptr },
+	{ "hora: zona con nombre entre <>", "timezone = <-03>3\n", false, 100, 100, nullptr },
+	{ "hora: zona invalida", "timezone = Europe/Madrid hora\n", false, 100, 100, "timezone" },
 };
 
 static const TScaleCase ScaleCases[] =
@@ -314,10 +317,53 @@ int main (void)
 		Check (Config.nMidiVolume == Case.nMidi, Case.pName, "midi_volume");
 		Check (Config.nMouseSpeed == (strstr (Case.pContents, "mouse_speed = 200") ? 200u : 100u), Case.pName, "mouse_speed");
 		Check (Config.nSetupWait == (strstr (Case.pContents, "setup_wait = 0") ? 0u : 2u), Case.pName, "setup_wait");
+		{
+			const char *pTZ = strstr (Case.pContents, "timezone = ");
+			const bool bValid = pTZ != nullptr && Case.pWarn == nullptr;
+			std::string Want = bValid ? std::string (pTZ + 11, strcspn (pTZ + 11, "\n")) : std::string ("UTC0");
+			Check (Want == Config.TimeZone, Case.pName, "timezone", Config.TimeZone, Want.c_str ());
+		}
 		if (Case.pWarn != nullptr)
 			Check (strstr (Config.Warning, Case.pWarn) != nullptr, Case.pName, "aviso", Config.Warning, Case.pWarn);
 		else
 			Check (Config.Warning[0] == '\0', Case.pName, "sin aviso", Config.Warning, "");
+	}
+
+	// The board's network.
+	{
+		struct TNetCase { const char *pName; const char *pContents; int nNet; bool bDHCP; const char *pIP;
+				  unsigned nPrefix; const char *pHost; const char *pWarn; };
+		static const TNetCase NetCases[] =
+		{
+			{ "red: por defecto apagada", "display = 1280x720\n", 0, true, "0.0.0.0", 24, "bmdos", nullptr },
+			{ "red: wifi con dhcp", "network = wifi\nip = dhcp\n", 2, true, "0.0.0.0", 24, "bmdos", nullptr },
+			{ "red: ethernet con ip fija", "network = ethernet\nip = 192.168.1.50/24\ngateway = 192.168.1.1\ndns = 8.8.8.8\nhostname = salon-pc\n",
+			  1, false, "192.168.1.50", 24, "salon-pc", nullptr },
+			{ "red: ip sin prefijo", "ip = 10.0.0.7\n", 0, false, "10.0.0.7", 24, "bmdos", nullptr },
+			{ "red: ip invalida", "ip = 300.1.1.1/24\n", 0, true, "0.0.0.0", 24, "bmdos", "ip" },
+			{ "red: prefijo invalido", "ip = 10.0.0.7/40\n", 0, true, "0.0.0.0", 24, "bmdos", "ip" },
+			{ "red: tipo desconocido", "network = 5g\n", 0, true, "0.0.0.0", 24, "bmdos", "network" },
+			{ "red: hostname invalido", "hostname = mi-pc!\n", 0, true, "0.0.0.0", 24, "bmdos", "hostname" },
+		};
+		for (const TNetCase &Case : NetCases)
+		{
+			FILE *pFile = fopen (BOOT_CONFIG, "w");
+			if (pFile == nullptr) { Errors++; continue; }
+			fputs (Case.pContents, pFile);
+			fclose (pFile);
+			TBootConfig Config;
+			ReadBootConfig (&Config);
+			char IP[20];
+			snprintf (IP, sizeof IP, "%u.%u.%u.%u", Config.IP[0], Config.IP[1], Config.IP[2], Config.IP[3]);
+			Check (static_cast<int> (Config.Network) == Case.nNet, Case.pName, "network");
+			Check (Config.bDHCP == Case.bDHCP, Case.pName, "dhcp");
+			Check (strcmp (IP, Case.pIP) == 0 && Config.nPrefix == Case.nPrefix, Case.pName, "ip", IP, Case.pIP);
+			Check (strcmp (Config.Hostname, Case.pHost) == 0, Case.pName, "hostname", Config.Hostname, Case.pHost);
+			if (Case.pWarn != nullptr)
+				Check (strstr (Config.Warning, Case.pWarn) != nullptr, Case.pName, "aviso", Config.Warning, Case.pWarn);
+			else
+				Check (Config.Warning[0] == '\0', Case.pName, "sin aviso", Config.Warning, "");
+		}
 	}
 
 	for (const TScaleCase &Case : ScaleCases)

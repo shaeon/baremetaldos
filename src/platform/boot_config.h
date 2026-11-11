@@ -86,6 +86,37 @@ static constexpr unsigned DefaultDisplayHeight = 720;
 static constexpr unsigned MaxDisplayWidth = 1920;
 static constexpr unsigned MaxDisplayHeight = 1080;
 
+/// "a.b.c.d" or, with pPrefix, "a.b.c.d/n" (n 1..32, default 24).  FALSE if
+/// it is not that.
+inline bool BootConfigParseIP (const char *pText, unsigned char *pAddr, unsigned *pPrefix)
+{
+	unsigned n[4] = {}, nPrefix = 24;
+	int nUsed = 0;
+	if (sscanf (pText, "%u.%u.%u.%u%n", &n[0], &n[1], &n[2], &n[3], &nUsed) != 4)
+	{
+		return false;
+	}
+	const char *pRest = pText + nUsed;
+	if (*pRest == '/')
+	{
+		if (pPrefix == nullptr) return false;
+		char *pEnd = nullptr;
+		nPrefix = static_cast<unsigned> (strtoul (pRest + 1, &pEnd, 10));
+		if (pEnd == pRest + 1 || *pEnd != '\0' || nPrefix < 1 || nPrefix > 32) return false;
+	}
+	else if (*pRest != '\0')
+	{
+		return false;
+	}
+	for (unsigned i = 0; i < 4; i++)
+	{
+		if (n[i] > 255) return false;
+		pAddr[i] = static_cast<unsigned char> (n[i]);
+	}
+	if (pPrefix != nullptr) *pPrefix = nPrefix;
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // The parser
 // ---------------------------------------------------------------------------
@@ -165,6 +196,22 @@ struct TBootConfig
 	// starts), 0-5; 0 = no wait (Win+F12 still opens it later).
 	unsigned nSetupWait;
 
+	// DOS's time zone, as a POSIX TZ rule (newlib's TZ): "UTC0", or with
+	// daylight saving, "CET-1CEST,M3.5.0,M10.5.0/3" for peninsular Spain.
+	char TimeZone[64];
+
+	// The board's own network (bare_net.cpp): off (default), the Ethernet
+	// port, or WiFi (SD:/wpa_supplicant.conf + firmware in SD:/firmware/).
+	// ip = dhcp, or a fixed address with its prefix ("192.168.1.50/24") and
+	// then gateway and dns as well.
+	enum TNetwork { NetOff, NetEthernet, NetWiFi } Network;
+	char Hostname[32];
+	bool bDHCP;
+	unsigned char IP[4];
+	unsigned nPrefix;			// /24 -> 255.255.255.0
+	unsigned char Gateway[4];
+	unsigned char DNS[4];
+
 	// What the file said that could not be used.  ReadBootConfig is a plain
 	// function on purpose (it runs before anything else exists and has no
 	// business touching the kernel), so it cannot call CKernel::Report();
@@ -228,6 +275,14 @@ void ReadBootConfig (TBootConfig *pConfig)
 	pConfig->nMidiVolume = 100;
 	pConfig->nMouseSpeed = 100;
 	pConfig->nSetupWait = 2;
+	strcpy (pConfig->TimeZone, "UTC0");
+	pConfig->Network = TBootConfig::NetOff;
+	strcpy (pConfig->Hostname, "bmdos");
+	pConfig->bDHCP = true;
+	memset (pConfig->IP, 0, sizeof pConfig->IP);
+	pConfig->nPrefix = 24;
+	memset (pConfig->Gateway, 0, sizeof pConfig->Gateway);
+	memset (pConfig->DNS, 0, sizeof pConfig->DNS);
 	pConfig->Warning[0] = '\0';
 
 	FILE *pFile = fopen (BOOT_CONFIG, "r");
@@ -367,6 +422,65 @@ void ReadBootConfig (TBootConfig *pConfig)
 				BootConfigWarn (pConfig, "boot.conf: unknown audio_out \"%s\""
 					" (hdmi|jack)", pValue);
 			}
+		}
+		else if (strcmp (pKey, "network") == 0)
+		{
+			if (strcmp (pValue, "off") == 0) pConfig->Network = TBootConfig::NetOff;
+			else if (strcmp (pValue, "ethernet") == 0) pConfig->Network = TBootConfig::NetEthernet;
+			else if (strcmp (pValue, "wifi") == 0) pConfig->Network = TBootConfig::NetWiFi;
+			else BootConfigWarn (pConfig, "boot.conf: unknown network \"%s\" (off|ethernet|wifi)", pValue);
+		}
+		else if (strcmp (pKey, "hostname") == 0)
+		{
+			// Letters, digits and '-', as DHCP and mDNS want it.
+			bool bOk = pValue[0] != '\0' && strlen (pValue) < sizeof pConfig->Hostname;
+			for (const char *p = pValue; bOk && *p; p++)
+				bOk = (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '-';
+			if (bOk) strcpy (pConfig->Hostname, pValue);
+			else BootConfigWarn (pConfig, "boot.conf: hostname \"%s\" (letters, digits, '-', up to 31)", pValue);
+		}
+		else if (strcmp (pKey, "ip") == 0)
+		{
+			unsigned char Addr[4];
+			unsigned nPrefix = 24;
+			if (strcmp (pValue, "dhcp") == 0)
+			{
+				pConfig->bDHCP = true;
+			}
+			else if (BootConfigParseIP (pValue, Addr, &nPrefix))
+			{
+				pConfig->bDHCP = false;
+				memcpy (pConfig->IP, Addr, 4);
+				pConfig->nPrefix = nPrefix;
+			}
+			else
+			{
+				BootConfigWarn (pConfig, "boot.conf: ip \"%s\" (dhcp, or e.g. 192.168.1.50/24)", pValue);
+			}
+		}
+		else if (strcmp (pKey, "gateway") == 0 || strcmp (pKey, "dns") == 0)
+		{
+			unsigned char Addr[4];
+			if (BootConfigParseIP (pValue, Addr, nullptr))
+				memcpy (strcmp (pKey, "dns") == 0 ? pConfig->DNS : pConfig->Gateway, Addr, 4);
+			else
+				BootConfigWarn (pConfig, "boot.conf: %s \"%s\" is not an address", pKey, pValue);
+		}
+		else if (strcmp (pKey, "timezone") == 0)
+		{
+			// A POSIX TZ rule: letters, digits and + - , . / : < >, starting
+			// with a zone name.  newlib parses it; this only keeps out what
+			// cannot be one.
+			bool bOk = pValue[0] != '\0' && strlen (pValue) < sizeof pConfig->TimeZone
+				   && ((pValue[0] >= 'A' && pValue[0] <= 'Z') || (pValue[0] >= 'a' && pValue[0] <= 'z')
+				       || pValue[0] == '<');
+			for (const char *p = pValue; bOk && *p; p++)
+			{
+				bOk = (*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9')
+				      || strchr ("+-,./:<>", *p) != nullptr;
+			}
+			if (bOk) strcpy (pConfig->TimeZone, pValue);
+			else BootConfigWarn (pConfig, "boot.conf: timezone \"%s\" is not a POSIX TZ rule", pValue);
 		}
 		else if (strcmp (pKey, "setup_wait") == 0)
 		{

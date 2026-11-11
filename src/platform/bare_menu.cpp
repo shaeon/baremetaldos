@@ -248,7 +248,17 @@ enum TSettingId
 
 	SetBootLog = 600,
 	SetSetupWait,
+
+	SetNetwork = 700,
+	SetNetIP,
+	SetTimeZone,
 };
+
+// The address the network has now, if "Fijar la actual" was offered: saving
+// that choice writes the gateway and the DNS of the moment too.
+std::string s_NetCurrentGateway;
+std::string s_NetCurrentDNS;
+std::string s_NetCurrentChoice;		// the choice's value ("a.b.c.d/n"), "" if none
 
 void LiveScaler (const std::string &Value)
 {
@@ -621,6 +631,60 @@ void DefineSettings (void)
 		  { "80 °C", "80" }, { "85 °C", "85" } },
 		4, nullptr });
 
+	// --- Red ------------------------------------------------------------------
+
+	s_Settings.push_back ({ SetNetwork, FileBoot, "", "network", "Conexión",
+		"La red de la placa. Ethernet: el puerto de red. WiFi: la red de "
+		"SD:/wpa_supplicant.conf, con el firmware del chip en SD:/firmware/. Ninguna: "
+		"el arranque no la toca (es lo más rápido).",
+		TApply::RestartBoard,
+		{ { "Ninguna", "off" }, { "Ethernet", "ethernet" }, { "WiFi", "wifi" } }, 0, nullptr });
+
+	s_Settings.push_back ({ SetTimeZone, FileBoot, "", "timezone", "Zona horaria",
+		"La hora de DOS: la de la red (NTP) en esta zona, con el cambio de verano. DOS "
+		"la toma al arrancar, así que se aplica al reiniciar. Otra zona se escribe en "
+		"boot.conf como regla POSIX (timezone = ...).",
+		TApply::RestartDOSBox,
+		{ { "España (península)", "CET-1CEST,M3.5.0,M10.5.0/3" },
+		  { "Canarias, Portugal", "WET0WEST,M3.5.0/1,M10.5.0" },
+		  { "Reino Unido", "GMT0BST,M3.5.0/1,M10.5.0" },
+		  { "Europa central", "CET-1CEST,M3.5.0,M10.5.0/3" },
+		  { "UTC", "UTC0" },
+		  { "México (centro)", "CST6" },
+		  { "Colombia, Perú", "<-05>5" },
+		  { "Venezuela", "<-04>4" },
+		  { "Argentina, Uruguay", "<-03>3" },
+		  { "Chile", "<-04>4<-03>,M9.1.6/24,M4.1.6/24" },
+		  { "EE. UU. este", "EST5EDT,M3.2.0,M11.1.0" },
+		  { "EE. UU. oeste", "PST8PDT,M3.2.0,M11.1.0" } },
+		4, nullptr });
+
+	{
+		TSetting IP { SetNetIP, FileBoot, "", "ip", "Dirección IP",
+			"DHCP: la da el router. Fija: siempre la misma, útil para entrar por la red "
+			"desde el PC. \"Fijar la actual\" guarda como fija la que tiene ahora, con su "
+			"puerta de enlace y su DNS. Otra distinta se escribe en boot.conf (ip =, "
+			"gateway =, dns =).",
+			TApply::RestartBoard, { { "DHCP", "dhcp" } }, 0, nullptr };
+
+		s_NetCurrentChoice.clear ();
+		TBareNetInfo Net;
+		BareNetInfo (&Net);
+		if (BareNetReady () && Net.IP[0] != '\0')
+		{
+			unsigned m[4] = {}, nPrefix = 0;
+			sscanf (Net.Mask, "%u.%u.%u.%u", &m[0], &m[1], &m[2], &m[3]);
+			for (unsigned i = 0; i < 4; i++) nPrefix += static_cast<unsigned> (__builtin_popcount (m[i]));
+			char Choice[32];
+			snprintf (Choice, sizeof Choice, "%s/%u", Net.IP, nPrefix ? nPrefix : 24);
+			s_NetCurrentChoice = Choice;
+			s_NetCurrentGateway = Net.Gateway;
+			s_NetCurrentDNS = Net.DNS;
+			IP.Choices.push_back ({ "Fijar la actual: " + std::string (Net.IP), s_NetCurrentChoice });
+		}
+		s_Settings.push_back (IP);
+	}
+
 	// --- Arranque -------------------------------------------------------------
 
 	s_Settings.push_back ({ SetBootLog, FileBoot, "", "boot_log", "Mensajes de arranque",
@@ -807,7 +871,9 @@ void LoadSettings (void)
 			bFound = DOSBoxConf.Get (S.pSection, S.pKey, &Value);
 		}
 
-		Value = bareconf::Lower (bareconf::Trim (Value));
+		// Values compare without regard to case - except a time zone, where
+		// "CET" and "cet" are different zone names to newlib.
+		Value = S.nId == SetTimeZone ? bareconf::Trim (Value) : bareconf::Lower (bareconf::Trim (Value));
 		if (S.nId == SetCycles)
 		{
 			Value = NormaliseCycles (Value);
@@ -949,6 +1015,12 @@ bool SaveSettings (void)
 			if (S.nPending == S.nSaved) continue;
 			if (S.nId == SetDisplay) Conf.Set ("", "display", S.Choices[S.nPending].Value);
 			else if (S.File == FileBoot) Conf.Set (S.pSection, S.pKey, S.Choices[S.nPending].Value);
+			if (S.nId == SetNetIP && !s_NetCurrentChoice.empty ()
+			    && S.Choices[S.nPending].Value == s_NetCurrentChoice)
+			{
+				if (!s_NetCurrentGateway.empty ()) Conf.Set ("", "gateway", s_NetCurrentGateway);
+				if (!s_NetCurrentDNS.empty ()) Conf.Set ("", "dns", s_NetCurrentDNS);
+			}
 		}
 		bOk = WriteText (BootPath, Conf.Text ()) && bOk;
 	}
@@ -1175,18 +1247,6 @@ TPage PageSistema (void)
 	return P;
 }
 
-TPage PagePlanned (const char *pTitle, const char *pHelp,
-		   std::initializer_list<std::pair<const char *, TApply>> Items)
-{
-	TPage P;
-	P.Title = pTitle;
-	P.Help = pHelp;
-	for (const auto &I : Items)
-	{
-		P.Items.push_back (Planned (I.first, "Llegará en un paso próximo del menú.", I.second));
-	}
-	return P;
-}
 
 TPage PageSalir (void)
 {
@@ -1536,17 +1596,63 @@ void BuildPages (void)
 		Pages.push_back (P);
 	}
 
-	Pages.push_back (PagePlanned ("Red", "Conexión de la placa y red para DOS.",
 	{
-		{ "WiFi", TApply::RestartBoard },
-		{ "Ethernet", TApply::RestartBoard },
-		{ "Dirección IP", TApply::RestartBoard },
-		{ "NE2000 para DOS", TApply::RestartDOSBox },
-		{ "Módem en COM1 (telnet)", TApply::RestartDOSBox },
-		{ "IPX", TApply::RestartDOSBox },
-		{ "Hora por NTP", TApply::RestartBoard },
-		{ "Servidor web de la tarjeta", TApply::RestartBoard },
-	}));
+		TPage P;
+		P.Title = "Red";
+		P.Help = "La red de la placa, y lo que DOS verá de ella.";
+
+		TBareNetInfo Net;
+		BareNetInfo (&Net);
+		auto Or = [] (const char *p) { return std::string (p[0] ? p : "-"); };
+		char Now[48];
+		BareNetLocalTime (Now, sizeof Now);
+
+		// The WiFi network named in wpa_supplicant.conf, for reference.
+		std::string SSID = "(sin wpa_supplicant.conf)";
+		{
+			std::string Text;
+			if (ReadText ("SD:/wpa_supplicant.conf", &Text))
+			{
+				SSID = "(sin red en el fichero)";
+				const size_t a = Text.find ("ssid=\"");
+				if (a != std::string::npos)
+				{
+					const size_t b = Text.find ('"', a + 6);
+					if (b != std::string::npos) SSID = Text.substr (a + 6, b - a - 6);
+				}
+			}
+		}
+
+		P.Items =
+		{
+			Section ("La placa"),
+			SettingItem (*FindSetting (SetNetwork)),
+			SettingItem (*FindSetting (SetNetIP)),
+			Info ("Red WiFi", SSID, "La red de SD:/wpa_supplicant.conf. Se edita en el PC "
+			      "por ahora; elegirla desde aquí llega en el paso siguiente."),
+			Section ("Estado"),
+			Info ("Estado", BareNetState ()),
+			Info ("Dirección", Or (Net.IP)),
+			Info ("Máscara", Or (Net.Mask)),
+			Info ("Puerta de enlace", Or (Net.Gateway)),
+			Info ("DNS", Or (Net.DNS)),
+			Info ("MAC", Or (Net.MAC)),
+			Info ("Nombre en la red", Or (Net.Hostname)),
+			Section ("Hora"),
+			SettingItem (*FindSetting (SetTimeZone)),
+			Info ("Hora ahora", Now, "La de la red (NTP, pool.ntp.org) en la zona elegida. "
+			      "Sin red, la placa no sabe la hora: DOS empieza en 1970."),
+			Section ("Para DOS (próximamente)"),
+			Planned ("Elegir red WiFi", "Buscar redes y escribir la contraseña desde aquí."),
+			Planned ("Módem en COM1 (telnet)", "Para BBS: ATDT servidor:puerto.", TApply::RestartDOSBox),
+			Planned ("Null-modem por la red", "Dos máquinas jugando por cable serie, por TCP.",
+				 TApply::RestartDOSBox),
+			Planned ("IPX", "Para jugar en red local (DOOM, Duke 3D, Warcraft II).", TApply::RestartDOSBox),
+			Planned ("Servidor web de la tarjeta", "Copiar juegos desde el navegador del PC.",
+				 TApply::RestartBoard),
+		};
+		Pages.push_back (P);
+	}
 
 	{
 		TPage P;

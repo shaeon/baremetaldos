@@ -87,6 +87,18 @@ BareCoreRequestReboot
 BareDiskInsert
 BareDiskEject
 BareDiskAvailable
+# The board's network (bare_net.cpp): built for the board only, against
+# Circle's net and WLAN headers, which the host stand-ins do not carry.
+BareNetInit
+BareNetMode
+BareNetReady
+BareNetState
+BareNetInfo
+BareNetSetTimeZone
+BareNetTimeValid
+BareNetWaitForTime
+BareNetSocketsReady
+BareNetLocalTime
 BareCorePaused
 BareCoreRunFrame
 BareCoreSetFrameHook

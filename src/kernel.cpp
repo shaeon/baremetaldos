@@ -501,6 +501,29 @@ boolean CKernel::Initialize (void)
 
 	Report ("input: ok");
 
+	// DOS's time zone (newlib's TZ), before anything reads the local time.
+	BareNetSetTimeZone (Config.TimeZone);
+
+	// --- the board's network (boot.conf network) ------------------------------
+	// Started without waiting for the link, and before the SUPR window, so that
+	// DHCP and the WiFi association make progress while it waits.  A failure is
+	// reported and the boot goes on.
+	if (Config.Network != TBootConfig::NetOff)
+	{
+		TBareNetConfig Net {};
+		Net.Mode = Config.Network == TBootConfig::NetWiFi ? BareNetWiFi : BareNetEthernet;
+		Net.pHostname = Config.Hostname;
+		Net.bDHCP = Config.bDHCP ? TRUE : FALSE;
+		memcpy (Net.IP, Config.IP, 4);
+		memcpy (Net.Gateway, Config.Gateway, 4);
+		memcpy (Net.DNS, Config.DNS, 4);
+		const u32 nMask = Config.nPrefix >= 32 ? 0xFFFFFFFFu : ~(0xFFFFFFFFu >> Config.nPrefix);
+		for (unsigned i = 0; i < 4; i++) Net.Mask[i] = static_cast<u8> (nMask >> (24 - 8 * i));
+
+		Report ("net: %s, %s", Net.Mode == BareNetWiFi ? "WiFi" : "Ethernet",
+			BareNetInit (&Net) ? "arrancando en segundo plano" : BareNetState ());
+	}
+
 	// --- SUPR / F2: the setup menu before DOSBox starts -----------------------
 	// Like a PC's BIOS: a short window to get into the setup, for the settings
 	// that only apply before DOSBox exists.  Win+F12 opens it later as well.
@@ -515,6 +538,17 @@ boolean CKernel::Initialize (void)
 			m_nStatusLine = 0;
 			Report ("setup: cerrado, sigue el arranque");
 		}
+	}
+
+	// --- the time, before DOSBox reads it ----------------------------------
+	// DOSBox sets DOS's clock once, when its BIOS starts; the board has no
+	// clock of its own, so with the network on, give NTP a few seconds.
+	if (Config.Network != TBootConfig::NetOff)
+	{
+		char Now[48];
+		const boolean bTime = BareNetWaitForTime (8000);
+		BareNetLocalTime (Now, sizeof Now);
+		Report ("hora: %s", bTime ? Now : "sin hora de red, DOS empieza en 1970");
 	}
 
 	// --- report what we found --------------------------------------------
