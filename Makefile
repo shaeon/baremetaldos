@@ -221,8 +221,11 @@ DOSBOX_INCLUDES = \
 #   __LIBRETRO__     selects the libretro platform layer inside DOSBox
 #   C_TARGETCPU      picks the CPU engine; we start with the interpreter
 #   FMT_HEADER_ONLY  fmt is header-only in the port (no separate .cc to build)
-#   C_IPX=0          no IPX: it wants BSD sockets / SDL_net
-#   C_MODEM=0        no host modem
+#   C_IPX=0          no IPX yet (it needs SDL_net's UDP side, next step)
+#   C_MODEM=1        modem and null-modem on the serial ports, over TCP:
+#                    src/dosbox-stub/SDL_net.h, on Circle's network by
+#                    src/platform/bare_sdlnet.cpp (bare_net.cpp brings
+#                    the board on the network)
 #   C_HAVE_MPROTECT  must NOT be defined: no mprotect before the JIT milestone
 #
 # C_STANDARD/C++ standard: DOSBox-core needs C++17 at least; its own build uses
@@ -240,7 +243,7 @@ DOSBOX_DEFINES := \
 	-D__LIBRETRO__ \
 	-DWITH_FAKE_SDL \
 	-DC_IPX=0 \
-	-DC_MODEM=0 \
+	-DC_MODEM=1 \
 	-DFMT_HEADER_ONLY \
 	-DGIT_VERSION=\"baremetal\" \
 	-DSVN_VERSION=\"\" \
@@ -597,6 +600,7 @@ APP_SRCS := \
 	src/platform/bare_cores.cpp \
 	src/platform/bare_menu.cpp \
 	src/platform/bare_net.cpp \
+	src/platform/bare_sdlnet.cpp \
 	src/platform/bare_midi.cpp \
 	src/dosbox-stub/midi_stub.cpp \
 	src/dosbox-stub/posix_stubs.cpp

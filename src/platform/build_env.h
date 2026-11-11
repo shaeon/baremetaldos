@@ -49,9 +49,11 @@
 #undef  C_IPX
 #define C_IPX 0
 
-// No modem/serial emulation that talks to a host device.  The dummy serial
-// port (used by some games to probe COM1) stays available.
-#undef  C_MODEM
+// The modem and the null-modem talk TCP through src/dosbox-stub/SDL_net.h,
+// which src/platform/bare_sdlnet.cpp implements on Circle's network: C_MODEM
+// comes from the Makefile (1).  Serial passthrough to a host device does not
+// exist here.  The dummy serial port (used by some games to probe COM1) stays
+// available.
 #undef  C_DIRECTSERIAL
 
 // 3) Circle interrupts are documented to work on core 0 only, and DOSBox-core

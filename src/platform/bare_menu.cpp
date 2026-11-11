@@ -252,6 +252,8 @@ enum TSettingId
 	SetNetwork = 700,
 	SetNetIP,
 	SetTimeZone,
+	SetSerial1,
+	SetSerial2,
 };
 
 // The address the network has now, if "Fijar la actual" was offered: saving
@@ -659,6 +661,27 @@ void DefineSettings (void)
 		  { "EE. UU. oeste", "PST8PDT,M3.2.0,M11.1.0" } },
 		4, nullptr });
 
+	// Serial ports: what DOS finds on COM1 / COM2.  The modem dials a host
+	// (ATDT servidor:puerto, or ATDT 192.168.1.20:23) over the board's
+	// network; listening, it also answers incoming telnet calls.  Null-modem
+	// is a serial cable to another DOSBox over TCP: one side waits, the other
+	// connects (the connecting side needs the host, written in dosbox.conf).
+	for (int nPort = 1; nPort <= 2; nPort++)
+	{
+		s_Settings.push_back ({ nPort == 1 ? SetSerial1 : SetSerial2, FileDOSBox, "serial",
+			nPort == 1 ? "serial1" : "serial2", nPort == 1 ? "COM1" : "COM2",
+			"Lo que DOS encuentra en el puerto serie. Módem: para BBS y terminales; marca "
+			"con ATDT servidor:puerto (por ejemplo ATDT bbs.ejemplo.com:23) por la red de "
+			"la placa. Módem que contesta: además acepta llamadas telnet entrantes al "
+			"puerto 23. Null-modem: un cable serie con otro DOSBox por TCP; este lado "
+			"espera en el puerto 2323 (el otro se configura en su dosbox.conf con "
+			"nullmodem server:IP port:2323).",
+			TApply::RestartDOSBox,
+			{ { "Nada", "dummy" }, { "Módem", "modem" }, { "Módem que contesta", "modem listenport:23" },
+			  { "Null-modem (espera)", "nullmodem port:2323" }, { "Desactivado", "disabled" } },
+			0, nullptr });
+	}
+
 	{
 		TSetting IP { SetNetIP, FileBoot, "", "ip", "Dirección IP",
 			"DHCP: la da el router. Fija: siempre la misma, útil para entrar por la red "
@@ -877,6 +900,10 @@ void LoadSettings (void)
 		if (S.nId == SetCycles)
 		{
 			Value = NormaliseCycles (Value);
+		}
+		if (S.nId == SetSerial1 || S.nId == SetSerial2)
+		{
+			Value = NormaliseWords (Value);
 		}
 
 		// A value the list does not have is shown as it is, as the first
@@ -1642,11 +1669,11 @@ void BuildPages (void)
 			SettingItem (*FindSetting (SetTimeZone)),
 			Info ("Hora ahora", Now, "La de la red (NTP, pool.ntp.org) en la zona elegida. "
 			      "Sin red, la placa no sabe la hora: DOS empieza en 1970."),
-			Section ("Para DOS (próximamente)"),
+			Section ("Puertos serie"),
+			SettingItem (*FindSetting (SetSerial1)),
+			SettingItem (*FindSetting (SetSerial2)),
+			Section ("Próximamente"),
 			Planned ("Elegir red WiFi", "Buscar redes y escribir la contraseña desde aquí."),
-			Planned ("Módem en COM1 (telnet)", "Para BBS: ATDT servidor:puerto.", TApply::RestartDOSBox),
-			Planned ("Null-modem por la red", "Dos máquinas jugando por cable serie, por TCP.",
-				 TApply::RestartDOSBox),
 			Planned ("IPX", "Para jugar en red local (DOOM, Duke 3D, Warcraft II).", TApply::RestartDOSBox),
 			Planned ("Servidor web de la tarjeta", "Copiar juegos desde el navegador del PC.",
 				 TApply::RestartBoard),
