@@ -243,6 +243,12 @@ public:
 
 	bool DialogOpen (void) const { return m_bDialog; }
 
+	/// Show a page (and its first option), e.g. coming back from a sub-screen.
+	void GoToPage (unsigned nPage)
+	{
+		if (nPage < Pages.size ()) SetPage (nPage);
+	}
+
 	/// Selected item of the current page, or -1 when it has none selectable.
 	int Selected (void) const
 	{

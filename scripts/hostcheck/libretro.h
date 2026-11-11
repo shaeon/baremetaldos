@@ -39,6 +39,7 @@
 #define RETRO_ENVIRONMENT_SET_CONTROLLER_INFO                35
 #define RETRO_ENVIRONMENT_SET_CORE_OPTIONS_UPDATE_DISPLAY_CALLBACK 69
 #define RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE     58
+#define RETRO_ENVIRONMENT_SET_DISK_CONTROL_INTERFACE         13
 #define RETRO_ENVIRONMENT_SET_GEOMETRY                       37
 #define RETRO_ENVIRONMENT_SET_KEYBOARD_CALLBACK              12
 #define RETRO_ENVIRONMENT_SET_MESSAGE                        6
@@ -331,6 +332,18 @@ struct retro_perf_callback
 	void (*perf_start) (void);
 	void (*perf_stop) (void);
 	void (*perf_log) (void);
+};
+
+// Disk control (the setup menu swaps A: and D: through it).
+struct retro_disk_control_callback
+{
+	bool (*set_eject_state) (bool ejected);
+	bool (*get_eject_state) (void);
+	unsigned (*get_image_index) (void);
+	bool (*set_image_index) (unsigned index);
+	unsigned (*get_num_images) (void);
+	bool (*replace_image_index) (unsigned index, const struct retro_game_info *info);
+	bool (*add_image_index) (void);
 };
 
 struct retro_keyboard_callback

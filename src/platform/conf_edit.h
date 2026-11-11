@@ -176,6 +176,58 @@ public:
 		}
 	}
 
+	// --- whole lines, for [autoexec] (commands, not key=value) ----------
+
+	/// Lines of a section, as (index into the file, text), comments included.
+	std::vector<std::pair<size_t, std::string>> SectionLines (const std::string &Section) const
+	{
+		std::vector<std::pair<size_t, std::string>> Out;
+		std::string Current;
+		for (size_t i = 0; i < m_Lines.size (); i++)
+		{
+			const std::string T = Trim (m_Lines[i]);
+			if (!T.empty () && T[0] == '[' && T.find (']') != std::string::npos)
+			{
+				Current = Lower (Trim (T.substr (1, T.find (']') - 1)));
+				continue;
+			}
+			if (Current == Lower (Section)) Out.push_back ({ i, m_Lines[i] });
+		}
+		return Out;
+	}
+
+	/// Index of the [section] header line, or -1.
+	long SectionHeader (const std::string &Section) const
+	{
+		for (size_t i = 0; i < m_Lines.size (); i++)
+		{
+			const std::string T = Trim (m_Lines[i]);
+			if (!T.empty () && T[0] == '[' && T.find (']') != std::string::npos
+			    && Lower (Trim (T.substr (1, T.find (']') - 1))) == Lower (Section))
+				return static_cast<long> (i);
+		}
+		return -1;
+	}
+
+	size_t LineCount (void) const { return m_Lines.size (); }
+
+	void ReplaceLine (size_t nIndex, const std::string &Text)
+	{
+		if (nIndex < m_Lines.size ()) m_Lines[nIndex] = Text;
+	}
+
+	void InsertLine (size_t nIndex, const std::string &Text)
+	{
+		if (nIndex > m_Lines.size ()) nIndex = m_Lines.size ();
+		m_Lines.insert (m_Lines.begin () + nIndex, Text);
+		if (nIndex == m_Lines.size () - 1) m_bFinalNewline = true;
+	}
+
+	void RemoveLine (size_t nIndex)
+	{
+		if (nIndex < m_Lines.size ()) m_Lines.erase (m_Lines.begin () + nIndex);
+	}
+
 private:
 	enum class Kind { Other, Section, Key };
 
@@ -278,6 +330,103 @@ inline std::string CmdlineSet (const std::string &Text, const std::string &Key, 
 	std::string Head = Text.substr (0, nEnd);
 	if (!Head.empty () && Head.back () != ' ') Head += ' ';
 	return Head + Key + "=" + Value + Text.substr (nEnd);
+}
+
+// --- [autoexec] MOUNT lines --------------------------------------------------
+//
+// "MOUNT C /dos -freesize 1024": the drive letter is the second word and the
+// host folder the third; whatever follows (options) is kept.  Matched without
+// regard to case, comments excluded.
+
+inline std::vector<std::string> Words (const std::string &Line)
+{
+	std::vector<std::string> W;
+	size_t i = 0;
+	while (i < Line.size ())
+	{
+		while (i < Line.size () && std::isspace (static_cast<unsigned char> (Line[i]))) i++;
+		size_t j = i;
+		while (j < Line.size () && !std::isspace (static_cast<unsigned char> (Line[j]))) j++;
+		if (j > i) W.push_back (Line.substr (i, j - i));
+		i = j;
+	}
+	return W;
+}
+
+/// Index in the file of the active "MOUNT <letter> ..." line in [autoexec], or -1.
+inline long FindMount (const CConfText &C, char cLetter)
+{
+	for (const auto &L : C.SectionLines ("autoexec"))
+	{
+		const std::vector<std::string> W = Words (L.second);
+		if (W.size () >= 3 && W[0][0] != '#' && Lower (W[0]) == "mount"
+		    && Lower (W[1]) == std::string (1, static_cast<char> (std::tolower (cLetter))))
+		{
+			return static_cast<long> (L.first);
+		}
+	}
+	return -1;
+}
+
+/// The folder MOUNT <letter> points at, or "" when there is no such line.
+inline std::string GetMount (const CConfText &C, char cLetter)
+{
+	const long n = FindMount (C, cLetter);
+	if (n < 0) return "";
+	for (const auto &L : C.SectionLines ("autoexec"))
+		if (static_cast<long> (L.first) == n) return Words (L.second)[2];
+	return "";
+}
+
+/// Point MOUNT <letter> at Folder (options on the line kept), add the line
+/// after "MOUNT C" (or at the top of [autoexec]) if there is none, or remove
+/// it when Folder is empty.
+inline void SetMount (CConfText &C, char cLetter, const std::string &Folder)
+{
+	const long n = FindMount (C, cLetter);
+	if (n >= 0)
+	{
+		if (Folder.empty ())
+		{
+			C.RemoveLine (static_cast<size_t> (n));
+			return;
+		}
+		std::string Line;
+		for (const auto &L : C.SectionLines ("autoexec"))
+			if (static_cast<long> (L.first) == n) Line = L.second;
+		// Replace the third word in place, keeping everything around it.
+		size_t i = 0;
+		for (int w = 0; w < 2; w++)
+		{
+			while (i < Line.size () && std::isspace (static_cast<unsigned char> (Line[i]))) i++;
+			while (i < Line.size () && !std::isspace (static_cast<unsigned char> (Line[i]))) i++;
+		}
+		while (i < Line.size () && std::isspace (static_cast<unsigned char> (Line[i]))) i++;
+		size_t j = i;
+		while (j < Line.size () && !std::isspace (static_cast<unsigned char> (Line[j]))) j++;
+		C.ReplaceLine (static_cast<size_t> (n), Line.substr (0, i) + Folder + Line.substr (j));
+		return;
+	}
+
+	if (Folder.empty ()) return;
+
+	const std::string NewLine = std::string ("MOUNT ") + static_cast<char> (std::toupper (cLetter)) + " " + Folder;
+	const long nC = FindMount (C, 'c');
+	if (nC >= 0)
+	{
+		C.InsertLine (static_cast<size_t> (nC) + 1, NewLine);
+		return;
+	}
+	const long nHeader = C.SectionHeader ("autoexec");
+	if (nHeader >= 0)
+	{
+		C.InsertLine (static_cast<size_t> (nHeader) + 1, NewLine);
+	}
+	else
+	{
+		C.InsertLine (C.LineCount (), "[autoexec]");
+		C.InsertLine (C.LineCount (), NewLine);
+	}
 }
 
 } // namespace bareconf

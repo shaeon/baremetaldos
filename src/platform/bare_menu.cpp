@@ -35,7 +35,10 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <algorithm>
+#include <cstring>
 #include <dirent.h>
+#include <sys/stat.h>
 #include <string>
 
 #include "libretro.h"
@@ -90,7 +93,46 @@ enum TActionId
 	ActDefaults,
 	ActTestSound,
 	ActTestMidi,
+	ActDriveC,
+	ActDriveE,
+	ActDriveERemove,
+	ActFloppy,
+	ActFloppyEject,
+	ActCD,
+	ActCDEject,
+	ActBrowseUp,
+	ActBrowsePick,			// "elegir esta carpeta"
+	ActBrowseEntry = 10000,		// + index into the listing
 };
+
+// --- drives --------------------------------------------------------------------
+//
+// C: and E: are folders on the card, kept as MOUNT lines in dosbox.conf's
+// [autoexec] (R).  A: and D: are disk images swapped while DOS runs, through
+// the core's disk control (BareDiskInsert): nothing is saved for them, as a
+// disk changed by hand on a real PC is not either.
+
+struct TFolderDrive
+{
+	char cLetter;
+	std::string Default;
+	std::string Saved;		// from [autoexec]; "" = not mounted
+	std::string Pending;
+};
+
+TFolderDrive s_DriveC { 'C', "/dos", "", "" };
+TFolderDrive s_DriveE { 'E', "", "", "" };
+
+std::string s_FloppyImage;		// what this menu put in A: / D:, for display
+std::string s_CDImage;
+
+// --- the card browser ------------------------------------------------------------
+
+enum class TBrowse { None, FolderC, FolderE, Floppy, CD };
+
+TBrowse s_Browse = TBrowse::None;
+std::string s_BrowsePath = "/";
+std::vector<std::pair<std::string, bool>> s_BrowseEntries;	// name, is a folder
 
 // --- sound tests (core 0's frame loop) -------------------------------------
 //
@@ -537,6 +579,9 @@ void LoadSettings (void)
 	const bareconf::CConfText BootConf (Boot, true);
 	const bareconf::CConfText DOSBoxConf (DOSBox, false);
 
+	s_DriveC.Saved = s_DriveC.Pending = bareconf::GetMount (DOSBoxConf, 'C');
+	s_DriveE.Saved = s_DriveE.Pending = bareconf::GetMount (DOSBoxConf, 'E');
+
 	for (TSetting &S : s_Settings)
 	{
 		std::string Value;
@@ -631,7 +676,7 @@ bool AnyModified (void)
 	{
 		if (S.nPending != S.nSaved) return true;
 	}
-	return false;
+	return s_DriveC.Pending != s_DriveC.Saved || s_DriveE.Pending != s_DriveE.Saved;
 }
 
 bool ModifiedNeedsBoard (void)
@@ -645,7 +690,8 @@ bool ModifiedNeedsBoard (void)
 		if (S.nPending != S.nSaved
 		    && (S.Apply == TApply::RestartBoard || S.Apply == TApply::RestartDOSBox)) return true;
 	}
-	return false;
+	// The drives are R too.
+	return s_DriveC.Pending != s_DriveC.Saved || s_DriveE.Pending != s_DriveE.Saved;
 }
 
 void SetPending (TSetting &S, unsigned nChoice)
@@ -659,6 +705,9 @@ void SetPending (TSetting &S, unsigned nChoice)
 
 void Discard (void)
 {
+	s_DriveC.Pending = s_DriveC.Saved;
+	s_DriveE.Pending = s_DriveE.Saved;
+
 	for (TSetting &S : s_Settings)
 	{
 		if (S.nPending != S.nSaved)
@@ -670,6 +719,9 @@ void Discard (void)
 
 void LoadDefaults (void)
 {
+	s_DriveC.Pending = s_DriveC.Default;
+	s_DriveE.Pending = s_DriveE.Default;
+
 	for (TSetting &S : s_Settings)
 	{
 		if (S.nPending != S.nDefault && S.nDefault < S.Choices.size ())
@@ -691,6 +743,10 @@ bool SaveSettings (void)
 		if (S.nId == SetDisplay) { bCmdline = true; bBoot = true; }
 		else if (S.File == FileBoot) bBoot = true;
 		else if (S.File == FileDOSBox) bDOSBox = true;
+	}
+	if (s_DriveC.Pending != s_DriveC.Saved || s_DriveE.Pending != s_DriveE.Saved)
+	{
+		bDOSBox = true;
 	}
 
 	if (bCmdline)
@@ -739,6 +795,15 @@ bool SaveSettings (void)
 				}
 			}
 		}
+		// The folder drives: MOUNT lines in [autoexec].
+		for (TFolderDrive *pDrive : { &s_DriveC, &s_DriveE })
+		{
+			if (pDrive->Pending != pDrive->Saved)
+			{
+				bareconf::SetMount (Conf, pDrive->cLetter, pDrive->Pending);
+			}
+		}
+
 		// midiconfig: the SoundFont for General MIDI, the model for MT-32;
 		// left alone with no device (it may hold something set by hand).
 		{
@@ -765,6 +830,8 @@ bool SaveSettings (void)
 	{
 		S.nSaved = S.nPending;
 	}
+	s_DriveC.Saved = s_DriveC.Pending;
+	s_DriveE.Saved = s_DriveE.Pending;
 
 	CLogger::Get ()->Write (FromMenu, bOk ? LogNotice : LogError,
 				bOk ? "settings saved" : "settings: a file could not be written");
@@ -949,8 +1016,179 @@ TPage PageSalir (void)
 	return P;
 }
 
+// --- browser ---------------------------------------------------------------------
+
+bool BrowseWants (const std::string &Name, bool bFolder)
+{
+	if (bFolder) return true;
+	const std::string L = bareconf::Lower (Name);
+	auto Ends = [&] (const char *pExt) { const size_t n = strlen (pExt);
+					      return L.size () > n && L.compare (L.size () - n, n, pExt) == 0; };
+	switch (s_Browse)
+	{
+	case TBrowse::Floppy:	return Ends (".img");		// what the core's disk control mounts in A:
+	case TBrowse::CD:	return Ends (".iso") || Ends (".cue");
+	default:		return false;			// folder modes list folders only
+	}
+}
+
+void BrowseRead (void)
+{
+	s_BrowseEntries.clear ();
+	DIR *pDir = opendir (("SD:" + s_BrowsePath).c_str ());
+	if (pDir != nullptr)
+	{
+		while (const dirent *pEntry = readdir (pDir))
+		{
+			const std::string Name = pEntry->d_name;
+			if (Name.empty () || Name[0] == '.') continue;
+			// Circle's newlib has no d_type (FatFs's FILINFO is not passed
+			// on), so the entry is asked about by name.
+			struct stat Info;
+			const std::string Full = "SD:" + (s_BrowsePath == "/" ? "/" + Name : s_BrowsePath + "/" + Name);
+			const bool bFolder = stat (Full.c_str (), &Info) == 0 && S_ISDIR (Info.st_mode);
+			if (BrowseWants (Name, bFolder) && s_BrowseEntries.size () < 400)
+			{
+				s_BrowseEntries.push_back ({ Name, bFolder });
+			}
+		}
+		closedir (pDir);
+	}
+
+	// Folders first, then files, each by name without regard to case.
+	std::sort (s_BrowseEntries.begin (), s_BrowseEntries.end (),
+		   [] (const auto &a, const auto &b)
+		   {
+			   if (a.second != b.second) return a.second;
+			   return bareconf::Lower (a.first) < bareconf::Lower (b.first);
+		   });
+}
+
+void BrowseOpen (TBrowse Mode, const std::string &Start)
+{
+	s_Browse = Mode;
+	s_BrowsePath = Start.empty () || Start[0] != '/' ? "/" : Start;
+
+	// Start where the current value is: for an image, in its folder.
+	if (Mode == TBrowse::Floppy || Mode == TBrowse::CD)
+	{
+		const size_t n = s_BrowsePath.find_last_of ('/');
+		s_BrowsePath = n == 0 ? "/" : s_BrowsePath.substr (0, n);
+	}
+
+	BrowseRead ();
+	if (s_BrowseEntries.empty () && s_BrowsePath != "/")
+	{
+		s_BrowsePath = "/";		// the folder is gone: start at the root
+		BrowseRead ();
+	}
+}
+
+std::string BrowseJoin (const std::string &Name)
+{
+	return s_BrowsePath == "/" ? "/" + Name : s_BrowsePath + "/" + Name;
+}
+
+TPage PageBrowser (void)
+{
+	TPage P;
+	const bool bFolders = s_Browse == TBrowse::FolderC || s_Browse == TBrowse::FolderE;
+	P.Title = s_Browse == TBrowse::FolderC ? "Elegir carpeta para C:"
+		: s_Browse == TBrowse::FolderE ? "Elegir carpeta para E:"
+		: s_Browse == TBrowse::Floppy ? "Elegir disquete (.img) para A:"
+		: "Elegir CD (.iso / .cue) para D:";
+	P.Help = "Intro abre una carpeta. Esc vuelve sin elegir nada.";
+
+	P.Items.push_back (Section (s_BrowsePath));
+	if (bFolders)
+	{
+		P.Items.push_back (Action ("[ Elegir esta carpeta ]", ActBrowsePick,
+			Format ("La unidad apuntará a %s.", s_BrowsePath.c_str ())));
+	}
+	if (s_BrowsePath != "/")
+	{
+		P.Items.push_back (Action ("..", ActBrowseUp, "La carpeta de arriba."));
+	}
+	for (size_t i = 0; i < s_BrowseEntries.size (); i++)
+	{
+		const auto &E = s_BrowseEntries[i];
+		P.Items.push_back (Action (E.second ? E.first + "/" : E.first,
+					   ActBrowseEntry + static_cast<int> (i),
+					   E.second ? "Intro: entrar en la carpeta."
+						    : "Intro: meter esta imagen en la unidad, al momento."));
+	}
+	if (s_BrowseEntries.empty ())
+	{
+		P.Items.push_back (Info (bFolders ? "(no hay carpetas)" : "(no hay imágenes aquí)", ""));
+	}
+	return P;
+}
+
+TPage PageUnidades (void)
+{
+	TPage P;
+	P.Title = "Unidades";
+	P.Help = "Carpetas de la tarjeta como discos duros, y disquetes y CD como imágenes.";
+
+	auto Folder = [] (const TFolderDrive &D) { return D.Pending.empty () ? std::string ("(ninguna)") : D.Pending; };
+
+	TItem C = Action ("Unidad C:", ActDriveC,
+		"La carpeta de la tarjeta que DOS ve como C:. Intro abre el explorador. Se guarda "
+		"como MOUNT C en el [autoexec] de dosbox.conf, conservando sus opciones.");
+	C.Value = Folder (s_DriveC);
+	C.Apply = TApply::RestartDOSBox;
+	C.bModified = s_DriveC.Pending != s_DriveC.Saved;
+
+	TItem E = Action ("Unidad E:", ActDriveE,
+		"Una segunda carpeta como E:, por ejemplo para tener juegos y utilidades por "
+		"separado. Se guarda como MOUNT E, justo después de MOUNT C.");
+	E.Value = Folder (s_DriveE);
+	E.Apply = TApply::RestartDOSBox;
+	E.bModified = s_DriveE.Pending != s_DriveE.Saved;
+
+	P.Items = { Section ("Discos duros (carpetas)"), C, E };
+	if (!s_DriveE.Pending.empty ())
+	{
+		TItem Remove = Action ("Quitar E:", ActDriveERemove, "Deja de montar E: al arrancar.");
+		Remove.Apply = TApply::RestartDOSBox;
+		P.Items.push_back (Remove);
+	}
+
+	P.Items.push_back (Section ("Disquete y CD-ROM (al momento)"));
+	if (BareDiskAvailable ())
+	{
+		TItem A = Action ("Disquetera A:", ActFloppy,
+			"Mete una imagen de disquete (.img) en A: sin reiniciar: como cambiar el "
+			"disco en un PC de verdad. No se guarda: al reiniciar, A: vuelve a estar "
+			"como diga el autoexec.");
+		A.Value = s_FloppyImage.empty () ? "(vacía)" : s_FloppyImage.substr (s_FloppyImage.find_last_of ('/') + 1);
+		TItem D = Action ("CD-ROM D:", ActCD,
+			"Mete una imagen de CD (.iso o .cue con su .bin) en D: sin reiniciar. Para "
+			"juegos de varios CD, vuelve aquí cuando pidan el siguiente.");
+		D.Value = s_CDImage.empty () ? "(vacío)" : s_CDImage.substr (s_CDImage.find_last_of ('/') + 1);
+		P.Items.push_back (A);
+		P.Items.push_back (Action ("Expulsar disquete", ActFloppyEject, "Saca el disquete de A:."));
+		P.Items.push_back (D);
+		P.Items.push_back (Action ("Expulsar CD", ActCDEject, "Saca el CD de D:."));
+	}
+	else
+	{
+		P.Items.push_back (Info ("Disquetera A:", "no disponible",
+			"El core no ofreció su control de discos; los disquetes y CD siguen pudiendo "
+			"montarse con IMGMOUNT en el autoexec."));
+	}
+	return P;
+}
+
 void BuildPages (void)
 {
+	if (s_Browse != TBrowse::None)
+	{
+		s_Menu.Pages = { PageBrowser () };
+		s_Menu.Refresh ();
+		return;
+	}
+
 	std::vector<TPage> Pages;
 	Pages.push_back (PageSistema ());
 
@@ -975,15 +1213,7 @@ void BuildPages (void)
 		Pages.push_back (P);
 	}
 
-	Pages.push_back (PagePlanned ("Unidades", "Carpetas, imágenes de disco y CD-ROM.",
-	{
-		{ "Unidad C:", TApply::RestartDOSBox },
-		{ "Unidad D:", TApply::RestartDOSBox },
-		{ "Disquetera A:", TApply::Now },
-		{ "CD-ROM (ISO/CUE)", TApply::Now },
-		{ "Cambiar de disco", TApply::Now },
-		{ "Explorar la tarjeta", TApply::Now },
-	}));
+	Pages.push_back (PageUnidades ());
 
 	{
 		TPage P;
@@ -1179,8 +1409,86 @@ void SaveAndLeave (bool bRestartBoard)
 	Close ();
 }
 
+constexpr unsigned PageIndexUnidades = 2;	// Sistema, Máquina, Unidades, ...
+
+void BrowseStart (TBrowse Mode, const std::string &Start)
+{
+	BrowseOpen (Mode, Start);
+	BuildPages ();
+	s_Menu.GoToPage (0);
+}
+
+void BrowseClose (void)
+{
+	s_Browse = TBrowse::None;
+	BuildPages ();
+	s_Menu.GoToPage (PageIndexUnidades);
+}
+
+void Insert (const std::string &Path, bool bFloppy)
+{
+	BrowseClose ();
+	if (BareDiskInsert (Path.c_str ()))
+	{
+		(bFloppy ? s_FloppyImage : s_CDImage) = Path;
+		return;
+	}
+	s_Menu.OpenDialog (DlgSaveFailed, "No se pudo meter el disco",
+			   Format ("DOSBox no pudo montar %s. ¿Es una imagen válida? Las .cue "
+				   "necesitan su .bin al lado.", Path.c_str ()), { "Aceptar" });
+}
+
+void HandleBrowse (int nId)
+{
+	if (nId == ActBrowseUp)
+	{
+		const size_t n = s_BrowsePath.find_last_of ('/');
+		s_BrowsePath = n == 0 ? "/" : s_BrowsePath.substr (0, n);
+		BrowseRead ();
+		BuildPages ();
+		s_Menu.GoToPage (0);
+		return;
+	}
+
+	if (nId == ActBrowsePick)
+	{
+		(s_Browse == TBrowse::FolderC ? s_DriveC : s_DriveE).Pending = s_BrowsePath;
+		BrowseClose ();
+		return;
+	}
+
+	const size_t i = static_cast<size_t> (nId - ActBrowseEntry);
+	if (i >= s_BrowseEntries.size ()) return;
+	const auto Entry = s_BrowseEntries[i];
+	if (Entry.second)
+	{
+		s_BrowsePath = BrowseJoin (Entry.first);
+		BrowseRead ();
+		BuildPages ();
+		s_Menu.GoToPage (0);
+		return;
+	}
+
+	Insert (BrowseJoin (Entry.first), s_Browse == TBrowse::Floppy);
+}
+
 void HandleEvent (const TEvent &Ev)
 {
+	// The browser is a screen of its own: Esc leaves it, not the menu, and
+	// its entries are actions of their own.
+	if (s_Browse != TBrowse::None)
+	{
+		if (Ev.Kind == TEventKind::Close)
+		{
+			BrowseClose ();
+		}
+		else if (Ev.Kind == TEventKind::Action)
+		{
+			HandleBrowse (Ev.nId);
+		}
+		return;
+	}
+
 	switch (Ev.Kind)
 	{
 	case TEventKind::Close:
@@ -1212,6 +1520,27 @@ void HandleEvent (const TEvent &Ev)
 		case ActSaveRestart:	SaveAndLeave (true); break;
 		case ActDiscard:	Discard (); Close (); break;
 		case ActDefaults:	HandleEvent (TEvent { TEventKind::Defaults }); break;
+		case ActDriveC:
+			BrowseStart (TBrowse::FolderC, s_DriveC.Pending.empty () ? "/dos" : s_DriveC.Pending);
+			break;
+		case ActDriveE:
+			BrowseStart (TBrowse::FolderE, s_DriveE.Pending.empty () ? "/" : s_DriveE.Pending);
+			break;
+		case ActDriveERemove:
+			s_DriveE.Pending.clear ();
+			break;
+		case ActFloppy:
+			BrowseStart (TBrowse::Floppy, s_FloppyImage.empty () ? "/dos/x" : s_FloppyImage);
+			break;
+		case ActCD:
+			BrowseStart (TBrowse::CD, s_CDImage.empty () ? "/dos/x" : s_CDImage);
+			break;
+		case ActFloppyEject:
+			if (BareDiskEject ('A')) s_FloppyImage.clear ();
+			break;
+		case ActCDEject:
+			if (BareDiskEject ('D')) s_CDImage.clear ();
+			break;
 		case ActTestSound:
 			s_Test = TTest::Tone;
 			s_nTestStart = BareMicros ();

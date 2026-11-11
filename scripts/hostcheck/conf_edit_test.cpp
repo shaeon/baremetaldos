@@ -91,6 +91,34 @@ int main (int argc, char **argv)
 		Check (New.find ('\n') == New.find ("\r\n") + 1, "added lines use the file's CRLF");
 	}
 
+	std::printf ("[autoexec] MOUNT lines\n");
+	{
+		const std::string Orig =
+			"[dosbox]\n"
+			"machine=svga_s3\n"
+			"[autoexec]\n"
+			"# mount the card\n"
+			"MOUNT C /dos -freesize 1024\n"
+			"C:\n"
+			"#IMGMOUNT D /dos/ISO/X.ISO -t iso\n"
+			"KEYB es 850\n";
+		CConfText C (Orig, false);
+		Check (GetMount (C, 'C') == "/dos" && GetMount (C, 'e').empty (), "reads the folder of MOUNT C, none for E");
+		SetMount (C, 'c', "/dos/GAMES");
+		Check (C.Text ().find ("MOUNT C /dos/GAMES -freesize 1024\n") != std::string::npos,
+		       "C: moves to another folder, its options kept");
+		SetMount (C, 'e', "/extra");
+		Check (C.Text ().find ("MOUNT C /dos/GAMES -freesize 1024\nMOUNT E /extra\nC:\n") != std::string::npos,
+		       "a new drive is mounted right after C:, before switching to C:");
+		SetMount (C, 'E', "");
+		Check (C.Text ().find ("MOUNT E") == std::string::npos, "an empty folder removes the drive");
+		Check (C.Text ().find ("#IMGMOUNT D /dos/ISO/X.ISO -t iso\n") != std::string::npos &&
+		       C.Text ().find ("# mount the card\n") != std::string::npos, "comments in [autoexec] stay");
+		CConfText N ("[dosbox]\nmemsize=16\n", false);
+		SetMount (N, 'c', "/dos");
+		Check (N.Text () == "[dosbox]\nmemsize=16\n[autoexec]\nMOUNT C /dos\n", "no [autoexec]: it is created");
+	}
+
 	std::printf ("cmdline.txt\n");
 	{
 		const std::string Orig = "loglevel=4 logdev=tty1 keymap=es width=1280 height=720 socmaxtemp=80\n";
@@ -116,6 +144,7 @@ int main (int argc, char **argv)
 		CConfText D (Dos, false);
 		Check (!Dos.empty () && D.Text () == Dos, "sd/dosbox.conf round-trips unchanged");
 		Check (D.Get ("dosbox", "memsize", &v), "sd/dosbox.conf: [dosbox] memsize read");
+		Check (GetMount (D, 'c') == "/dos", "sd/dosbox.conf: MOUNT C read from [autoexec]");
 	}
 
 	std::printf ("\n%u failures\n", s_nFailures);

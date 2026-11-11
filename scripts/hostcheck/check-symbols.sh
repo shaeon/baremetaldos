@@ -83,6 +83,10 @@ BareCorePollRefreshMilliHz
 BareCoreReleaseAllKeys
 BareCoreRequestShutdown
 BareCoreRequestReboot
+# Disk images through the core's disk control (bare_libretro.cpp).
+BareDiskInsert
+BareDiskEject
+BareDiskAvailable
 BareCorePaused
 BareCoreRunFrame
 BareCoreSetFrameHook

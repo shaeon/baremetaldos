@@ -42,6 +42,9 @@ extern "C" boolean BareThreadAborted (void);
 
 #include <cstdarg>
 #include <cstdio>
+#include <string>
+#include <vector>
+#include <strings.h>
 #include <cstring>
 
 // The ordering rule for retro_set_controller_port_device().  Header only, no
@@ -278,6 +281,10 @@ static int16_t BareInputState (unsigned port, unsigned device, unsigned index,
 // arrive, and the core answered every input_cb(RETRO_DEVICE_KEYBOARD) question
 // that nobody asks.
 static retro_keyboard_callback s_CoreKeyboardCallback {};
+
+// The core's disk control interface (RETRO_ENVIRONMENT_SET_DISK_CONTROL_INTERFACE).
+static retro_disk_control_callback s_DiskControl {};
+static boolean s_bDiskControl = FALSE;
 static boolean s_bCoreKeyboardCallbackSet = FALSE;
 
 // Keys delivered, and the last one.  Kept after the status line stopped showing
@@ -870,9 +877,23 @@ static bool BareEnvironment (unsigned cmd, void *data)
 		return true;
 	}
 
+	// Disk control: how the setup menu changes the floppy in A: and the CD in
+	// D: while DOS runs.  DOSBox-core offers the extended interface first and
+	// the plain one if that is refused; the plain one has everything the menu
+	// uses (eject, add, replace, select), so that is the one taken - the
+	// extended asks the frontend for version 1 support it does not need.
 	case RETRO_ENVIRONMENT_GET_DISK_CONTROL_INTERFACE_VERSION:
 	case RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE:
-		return false;		// no disk swapping UI yet
+		return false;
+
+	case RETRO_ENVIRONMENT_SET_DISK_CONTROL_INTERFACE:
+		if (data != nullptr)
+		{
+			s_DiskControl = *static_cast<const retro_disk_control_callback *> (data);
+			s_bDiskControl = TRUE;
+			return true;
+		}
+		return false;
 
 	default:
 		return false;
@@ -1235,4 +1256,104 @@ void BareCoreRequestReboot (void)
 	// point is to come back up, not to stop.
 	CTimer::SimpleMsDelay (200);
 	reboot ();
+}
+
+// ---------------------------------------------------------------------------
+// Disk images in A: / D: (the setup menu's Unidades page)
+// ---------------------------------------------------------------------------
+//
+// Through the core's disk control: the core mounts a .img in A: and an .iso or
+// .cue in D: (libretro/src/disk_control.cpp).  Called from the frame loop
+// while the menu has the machine paused, between two retro_run()s - the place
+// a libretro frontend is expected to call it from.
+
+// The core keeps ONE list of images and ONE tray for both drives: closing the
+// tray mounts the selected image in A: or D: by its extension, opening it
+// unmounts the selected image from its drive.  So the frontend keeps what it
+// put in each drive (index into the core's list), and only ever opens the tray
+// over the image of the drive being changed - inserting a CD must not take
+// the floppy out.
+static std::vector<std::string> s_DiskPaths;	// parallel to the core's list
+static int s_nDiskInDrive[2] = { -1, -1 };	// [0] A:, [1] D: - index or -1
+
+static unsigned DiskDrive (const char *pPath)
+{
+	const size_t n = strlen (pPath);
+	return n > 4 && strcasecmp (pPath + n - 4, ".img") == 0 ? 0 : 1;
+}
+
+// Unmount what this frontend put in a drive, if anything.
+static void DiskOut (unsigned nDrive)
+{
+	const int nIndex = s_nDiskInDrive[nDrive];
+	if (nIndex < 0)
+	{
+		return;
+	}
+	if (s_DiskControl.get_image_index () != static_cast<unsigned> (nIndex))
+	{
+		s_DiskControl.set_image_index (static_cast<unsigned> (nIndex));
+	}
+	s_DiskControl.set_eject_state (true);	// unmounts the selected image
+	s_nDiskInDrive[nDrive] = -1;
+}
+
+boolean BareDiskInsert (const char *pPath)
+{
+	if (!s_bDiskControl || pPath == nullptr || s_DiskControl.add_image_index == nullptr)
+	{
+		return FALSE;
+	}
+
+	const unsigned nDrive = DiskDrive (pPath);
+	DiskOut (nDrive);
+
+	if (!s_DiskControl.add_image_index ())
+	{
+		return FALSE;
+	}
+	const unsigned nIndex = s_DiskControl.get_num_images () - 1;
+
+	retro_game_info Info {};
+	Info.path = pPath;
+	if (!s_DiskControl.replace_image_index (nIndex, &Info)
+	    || !s_DiskControl.set_image_index (nIndex))
+	{
+		return FALSE;
+	}
+	s_DiskPaths.resize (nIndex + 1);
+	s_DiskPaths[nIndex] = pPath;
+
+	// Closing the tray mounts it.  The core sets the state and mounts the
+	// selected image whatever the state was, so this works with the other
+	// drive's image still in place.
+	const bool bOk = s_DiskControl.set_eject_state (false);
+	if (bOk)
+	{
+		s_nDiskInDrive[nDrive] = static_cast<int> (nIndex);
+	}
+	CLogger::Get ()->Write (FromBare, bOk ? LogNotice : LogWarning,
+				"%s: %s %s", nDrive == 0 ? "A:" : "D:", pPath,
+				bOk ? "inserted" : "could NOT be inserted");
+	return bOk ? TRUE : FALSE;
+}
+
+boolean BareDiskEject (char cDrive)
+{
+	if (!s_bDiskControl)
+	{
+		return FALSE;
+	}
+	const unsigned nDrive = (cDrive == 'A' || cDrive == 'a') ? 0 : 1;
+	if (s_nDiskInDrive[nDrive] < 0)
+	{
+		return FALSE;
+	}
+	DiskOut (nDrive);
+	return TRUE;
+}
+
+boolean BareDiskAvailable (void)
+{
+	return s_bDiskControl;
 }

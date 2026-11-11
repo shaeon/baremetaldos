@@ -363,6 +363,14 @@ void    BareCoreReleaseAllKeys (void);
 void    BareCoreRequestShutdown (void);
 void    BareCoreRequestReboot (void);
 
+/// \brief Disk images through the core's disk control (bare_libretro.cpp):
+///\t   insert a .img (mounted as A:) or an .iso / .cue (as D:) in place of
+///\t   what this frontend put in that drive, or eject drive 'A' or 'D'.  From
+///\t   the frame loop, between frames.
+boolean BareDiskInsert (const char *pPath);
+boolean BareDiskEject (char cDrive);
+boolean BareDiskAvailable (void);
+
 /// \brief Take presentation back to core 0 (before anything else draws on
 ///\t   the screen, e.g. at shutdown).  Waits for core 2 to stop; leaves the
 ///\t   last picture on page 0.
