@@ -1,7 +1,7 @@
 //
 // bare_sdlnet.cpp
 //
-// BM-DOS - SDL_net for DOSBox's modem and null-modem (and IPX next), on
+// BM-DOS - SDL_net for DOSBox's modem, null-modem and IPX, on
 // Circle's TCP/IP stack: CSocket, CDNSClient.  The interface is
 // src/dosbox-stub/SDL_net.h; only what DOSBox uses is here.
 //
@@ -453,4 +453,166 @@ void SDLNet_FreeSocketSet (SDLNet_SocketSet pSet)
 	}
 	delete[] pSet->pSockets;
 	delete pSet;
+}
+
+// ---------------------------------------------------------------------------
+// UDP - DOSBox's IPX tunnels IPX packets in UDP datagrams (ipx.cpp is the
+// client, ipxserver.cpp the server that relays between the players)
+// ---------------------------------------------------------------------------
+//
+// A Circle UDP socket bound to a local port, with SDL_net's channels on top:
+// a channel is a list of destination addresses (DOSBox only ever binds one,
+// the IPX server's).  Receiving never waits - the IPX code polls from DOSBox's
+// timer - so it is a ReceiveFrom with MSG_DONTWAIT.
+
+struct _UDPsocket
+{
+	int ready;
+	CSocket *pSocket;
+	u16 nPort;
+	IPaddress Bound[SDLNET_MAX_UDPCHANNELS][SDLNET_MAX_UDPADDRESSES];
+	int nBound[SDLNET_MAX_UDPCHANNELS];
+};
+
+namespace {
+
+// Port 0 asks for "any port": Circle needs one to send from, so the client
+// side takes the next of a range that IPX servers (213 by default) do not use.
+u16 s_nNextUDPPort = 49200;
+
+bool SendOne (_UDPsocket *p, const IPaddress &To, const UDPpacket *pPacket)
+{
+	u8 Bytes[4];
+	memcpy (Bytes, &To.host, 4);
+	CIPAddress IP (Bytes);
+	return p->pSocket->SendTo (pPacket->data, static_cast<unsigned> (pPacket->len), 0,
+				   IP, HostPort (&To)) >= 0;
+}
+
+} // namespace
+
+UDPsocket SDLNet_UDP_Open (Uint16 nPort)
+{
+	CNetSubSystem *pNet = Net ();
+	if (pNet == nullptr)
+	{
+		return nullptr;
+	}
+
+	CSocket *pSocket = new CSocket (pNet, IPPROTO_UDP);
+	const u16 nLocal = nPort != 0 ? nPort : s_nNextUDPPort++;
+	if (pSocket == nullptr || pSocket->Bind (nLocal) < 0)
+	{
+		delete pSocket;
+		SetError ("no se pudo abrir ese puerto UDP");
+		return nullptr;
+	}
+
+	_UDPsocket *p = new _UDPsocket;
+	memset (p, 0, sizeof *p);
+	p->pSocket = pSocket;
+	p->nPort = nLocal;
+	CLogger::Get ()->Write (FromNet, LogNotice, "UDP on port %u", nLocal);
+	return p;
+}
+
+int SDLNet_UDP_Bind (UDPsocket p, int nChannel, const IPaddress *pAddress)
+{
+	if (p == nullptr || pAddress == nullptr)
+	{
+		return -1;
+	}
+	if (nChannel < 0)
+	{
+		for (nChannel = 0; nChannel < SDLNET_MAX_UDPCHANNELS && p->nBound[nChannel] != 0; nChannel++)
+		{
+		}
+	}
+	if (nChannel >= SDLNET_MAX_UDPCHANNELS || p->nBound[nChannel] >= SDLNET_MAX_UDPADDRESSES)
+	{
+		SetError ("no quedan canales UDP");
+		return -1;
+	}
+	p->Bound[nChannel][p->nBound[nChannel]++] = *pAddress;
+	return nChannel;
+}
+
+void SDLNet_UDP_Unbind (UDPsocket p, int nChannel)
+{
+	if (p != nullptr && nChannel >= 0 && nChannel < SDLNET_MAX_UDPCHANNELS)
+	{
+		p->nBound[nChannel] = 0;
+	}
+}
+
+int SDLNet_UDP_Send (UDPsocket p, int nChannel, UDPpacket *pPacket)
+{
+	if (p == nullptr || pPacket == nullptr || pPacket->len <= 0)
+	{
+		return 0;
+	}
+
+	int nSent = 0;
+	if (nChannel < 0)
+	{
+		nSent = SendOne (p, pPacket->address, pPacket) ? 1 : 0;
+	}
+	else if (nChannel < SDLNET_MAX_UDPCHANNELS)
+	{
+		for (int i = 0; i < p->nBound[nChannel]; i++)
+		{
+			nSent += SendOne (p, p->Bound[nChannel][i], pPacket) ? 1 : 0;
+		}
+	}
+	pPacket->status = nSent != 0 ? pPacket->len : -1;
+	return nSent;
+}
+
+int SDLNet_UDP_Recv (UDPsocket p, UDPpacket *pPacket)
+{
+	if (p == nullptr || pPacket == nullptr || pPacket->data == nullptr)
+	{
+		return -1;
+	}
+
+	CIPAddress From;
+	u16 nFromPort = 0;
+	const int n = p->pSocket->ReceiveFrom (pPacket->data, static_cast<unsigned> (pPacket->maxlen),
+					       MSG_DONTWAIT, &From, &nFromPort);
+	if (n <= 0)
+	{
+		return n < 0 ? -1 : 0;
+	}
+
+	u8 Bytes[4];
+	From.CopyTo (Bytes);
+	pPacket->address = ToIPaddress (Bytes, nFromPort);
+	pPacket->len = n;
+	pPacket->status = n;
+
+	// The channel the sender is bound to, as SDL_net reports it; -1 if none.
+	pPacket->channel = -1;
+	for (int c = 0; c < SDLNET_MAX_UDPCHANNELS && pPacket->channel < 0; c++)
+	{
+		for (int i = 0; i < p->nBound[c]; i++)
+		{
+			if (p->Bound[c][i].host == pPacket->address.host
+			    && p->Bound[c][i].port == pPacket->address.port)
+			{
+				pPacket->channel = c;
+				break;
+			}
+		}
+	}
+	return 1;
+}
+
+void SDLNet_UDP_Close (UDPsocket p)
+{
+	if (p == nullptr)
+	{
+		return;
+	}
+	delete p->pSocket;
+	delete p;
 }

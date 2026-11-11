@@ -254,6 +254,7 @@ enum TSettingId
 	SetTimeZone,
 	SetSerial1,
 	SetSerial2,
+	SetIPX,
 };
 
 // The address the network has now, if "Fijar la actual" was offered: saving
@@ -666,6 +667,13 @@ void DefineSettings (void)
 	// network; listening, it also answers incoming telnet calls.  Null-modem
 	// is a serial cable to another DOSBox over TCP: one side waits, the other
 	// connects (the connecting side needs the host, written in dosbox.conf).
+	s_Settings.push_back ({ SetIPX, FileDOSBox, "ipx", "ipx", "IPX",
+		"La red IPX de los juegos de los 90 (DOOM, Duke 3D, Warcraft II, Command & "
+		"Conquer), por UDP como en cualquier DOSBox. Con IPX activado, en DOS: IPXNET "
+		"STARTSERVER en una máquina, e IPXNET CONNECT <su IP> en las demás; luego el "
+		"juego, en modo red IPX. Vale con otros DOSBox de PC, no solo con placas.",
+		TApply::RestartDOSBox, { { "No", "false" }, { "Sí", "true" } }, 0, nullptr });
+
 	for (int nPort = 1; nPort <= 2; nPort++)
 	{
 		s_Settings.push_back ({ nPort == 1 ? SetSerial1 : SetSerial2, FileDOSBox, "serial",
@@ -1672,9 +1680,10 @@ void BuildPages (void)
 			Section ("Puertos serie"),
 			SettingItem (*FindSetting (SetSerial1)),
 			SettingItem (*FindSetting (SetSerial2)),
+			Section ("Juego en red"),
+			SettingItem (*FindSetting (SetIPX)),
 			Section ("Próximamente"),
 			Planned ("Elegir red WiFi", "Buscar redes y escribir la contraseña desde aquí."),
-			Planned ("IPX", "Para jugar en red local (DOOM, Duke 3D, Warcraft II).", TApply::RestartDOSBox),
 			Planned ("Servidor web de la tarjeta", "Copiar juegos desde el navegador del PC.",
 				 TApply::RestartBoard),
 		};

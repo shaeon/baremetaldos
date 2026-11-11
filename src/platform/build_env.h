@@ -45,9 +45,9 @@
 // No POSIX process/mman/socket layer in Circle.
 #undef  C_HAVE_MPROTECT
 
-// No IPX (needs SDL_net or BSD sockets).  DOSBox falls back to no networking.
-#undef  C_IPX
-#define C_IPX 0
+// IPX over UDP (DOSBox's ipxnet) uses the same SDL_net shim as the modem:
+// src/dosbox-stub/SDL_net.h on Circle's network (bare_sdlnet.cpp).  C_IPX
+// comes from the Makefile (1).
 
 // The modem and the null-modem talk TCP through src/dosbox-stub/SDL_net.h,
 // which src/platform/bare_sdlnet.cpp implements on Circle's network: C_MODEM

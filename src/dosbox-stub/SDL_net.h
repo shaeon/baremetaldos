@@ -72,6 +72,33 @@ int  SDLNet_DelSocket (SDLNet_SocketSet set, SDLNet_GenericSocket sock);
 int  SDLNet_CheckSockets (SDLNet_SocketSet set, Uint32 timeout);
 void SDLNet_FreeSocketSet (SDLNet_SocketSet set);
 
+// --- UDP (DOSBox's IPX over UDP: ipx.cpp, ipxserver.cpp) ----------------------
+
+typedef struct
+{
+	int channel;		// the channel it came from / goes to; -1: use address
+	Uint8 *data;
+	int len;
+	int maxlen;
+	int status;
+	IPaddress address;	// sender on receive, destination with channel -1
+} UDPpacket;
+
+#define SDLNET_MAX_UDPCHANNELS		32
+#define SDLNET_MAX_UDPADDRESSES		4
+
+/// A UDP socket bound to port (0: any free port).
+UDPsocket SDLNet_UDP_Open (Uint16 port);
+/// Bind an address to a channel (-1: the first free one).  The channel, or -1.
+int  SDLNet_UDP_Bind (UDPsocket sock, int channel, const IPaddress *address);
+void SDLNet_UDP_Unbind (UDPsocket sock, int channel);
+/// Send to the channel's addresses, or (channel -1) to packet->address.
+/// The number of destinations it went to (0 on failure).
+int  SDLNet_UDP_Send (UDPsocket sock, int channel, UDPpacket *packet);
+/// One datagram if there is one: 1, 0 if none (never waits), -1 on error.
+int  SDLNet_UDP_Recv (UDPsocket sock, UDPpacket *packet);
+void SDLNet_UDP_Close (UDPsocket sock);
+
 // Big-endian 16/32-bit fields, as the IPX code reads and writes them.
 #define SDLNet_Write16(value, areap) \
 	do { Uint8 *p_ = (Uint8 *) (areap); Uint16 v_ = (Uint16) (value); p_[0] = v_ >> 8; p_[1] = v_ & 0xFF; } while (0)

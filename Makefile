@@ -221,7 +221,8 @@ DOSBOX_INCLUDES = \
 #   __LIBRETRO__     selects the libretro platform layer inside DOSBox
 #   C_TARGETCPU      picks the CPU engine; we start with the interpreter
 #   FMT_HEADER_ONLY  fmt is header-only in the port (no separate .cc to build)
-#   C_IPX=0          no IPX yet (it needs SDL_net's UDP side, next step)
+#   C_IPX=1          IPX over UDP (ipxnet), on the same SDL_net shim as the
+#                    modem: src/platform/bare_sdlnet.cpp
 #   C_MODEM=1        modem and null-modem on the serial ports, over TCP:
 #                    src/dosbox-stub/SDL_net.h, on Circle's network by
 #                    src/platform/bare_sdlnet.cpp (bare_net.cpp brings
@@ -242,7 +243,7 @@ DOSBOX_INCLUDES = \
 DOSBOX_DEFINES := \
 	-D__LIBRETRO__ \
 	-DWITH_FAKE_SDL \
-	-DC_IPX=0 \
+	-DC_IPX=1 \
 	-DC_MODEM=1 \
 	-DFMT_HEADER_ONLY \
 	-DGIT_VERSION=\"baremetal\" \
@@ -251,8 +252,8 @@ DOSBOX_DEFINES := \
 	-D__QNX__ \
 	-DNO_PWD_H
 #
-# __QNX__ and NO_PWD_H are not a joke, and they are the same kind of decision as
-# C_IPX=0: they switch off two POSIX features of DOSBox's config.h that Circle
+# __QNX__ and NO_PWD_H are not a joke, and they are the same kind of decision
+# the C_ flags above are: they switch off two POSIX features of DOSBox's config.h that Circle
 # does not have.  They are defined on the *command line* because include/config.h
 # has no include guard (it is a generated file, meant to be included once), so a
 # -include wrapper cannot patch it - the second inclusion would redefine
@@ -692,6 +693,8 @@ DOSBOX_CORE_SRCS := \
 	$(DOSBOX_DIR)/src/hardware/gus.cpp \
 	$(DOSBOX_DIR)/src/hardware/hardware.cpp \
 	$(DOSBOX_DIR)/src/hardware/iohandler.cpp \
+	$(DOSBOX_DIR)/src/hardware/ipx.cpp \
+	$(DOSBOX_DIR)/src/hardware/ipxserver.cpp \
 	$(DOSBOX_DIR)/src/hardware/joystick.cpp \
 	$(DOSBOX_DIR)/src/hardware/keyboard.cpp \
 	$(DOSBOX_DIR)/src/hardware/mame/fmopl.cpp \
@@ -804,8 +807,6 @@ LIBRETRO_COMMON_SRCS := \
 #                               variable to 0 and this file is built instead.
 #   src/hardware/voodoo*.cpp  - OpenGL.  Not a define on our side: WITH_VOODOO=0,
 #                               which is what upstream's parser script uses too.
-#   src/hardware/ipx*.cpp     - C_IPX=0, no sockets.  Upstream does not build
-#                               them in a fakesdl build either.
 #   src/dos/cdrom_aspi_win32.cpp, cdrom_ioctl_win32.cpp
 #                             - the entire body is inside #if defined(WIN32);
 #                               the objects are empty.  Left out.
