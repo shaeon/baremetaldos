@@ -173,6 +173,8 @@ static const TAudioCase AudioCases[] =
 	{ "audio: midi_volume bajo el minimo", "midi_volume = 10\n", false, 100, 100, "midi_volume" },
 	{ "audio: salida desconocida", "audio_out = usb\n", false, 100, 100, "audio_out" },
 	{ "audio: volumen no numerico", "volume = alto\n", false, 100, 100, "volume" },
+	{ "raton: velocidad 200", "mouse_speed = 200\n", false, 100, 100, nullptr },
+	{ "raton: velocidad fuera de rango", "mouse_speed = 1000\n", false, 100, 100, "mouse_speed" },
 };
 
 static const TScaleCase ScaleCases[] =
@@ -308,6 +310,7 @@ int main (void)
 		Check (Config.bAudioJack == Case.bJack, Case.pName, "audio_out");
 		Check (Config.nVolume == Case.nVol, Case.pName, "volume");
 		Check (Config.nMidiVolume == Case.nMidi, Case.pName, "midi_volume");
+		Check (Config.nMouseSpeed == (strstr (Case.pContents, "mouse_speed = 200") ? 200u : 100u), Case.pName, "mouse_speed");
 		if (Case.pWarn != nullptr)
 			Check (strstr (Config.Warning, Case.pWarn) != nullptr, Case.pName, "aviso", Config.Warning, Case.pWarn);
 		else

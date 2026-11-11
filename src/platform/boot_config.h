@@ -157,6 +157,10 @@ struct TBootConfig
 	unsigned nVolume;
 	unsigned nMidiVolume;
 
+	// Mouse speed in percent (25-400), applied by the port to the USB mouse's
+	// movement before DOSBox sees it.
+	unsigned nMouseSpeed;
+
 	// What the file said that could not be used.  ReadBootConfig is a plain
 	// function on purpose (it runs before anything else exists and has no
 	// business touching the kernel), so it cannot call CKernel::Report();
@@ -218,6 +222,7 @@ void ReadBootConfig (TBootConfig *pConfig)
 	pConfig->bAudioJack = false;
 	pConfig->nVolume = 100;
 	pConfig->nMidiVolume = 100;
+	pConfig->nMouseSpeed = 100;
 	pConfig->Warning[0] = '\0';
 
 	FILE *pFile = fopen (BOOT_CONFIG, "r");
@@ -356,6 +361,19 @@ void ReadBootConfig (TBootConfig *pConfig)
 			{
 				BootConfigWarn (pConfig, "boot.conf: unknown audio_out \"%s\""
 					" (hdmi|jack)", pValue);
+			}
+		}
+		else if (strcmp (pKey, "mouse_speed") == 0)
+		{
+			char *pEnd = nullptr;
+			const unsigned long n = strtoul (pValue, &pEnd, 10);
+			if (pEnd == pValue || *pEnd != '\0' || n < 25 || n > 400)
+			{
+				BootConfigWarn (pConfig, "boot.conf: mouse_speed \"%s\" is not 25-400", pValue);
+			}
+			else
+			{
+				pConfig->nMouseSpeed = static_cast<unsigned> (n);
 			}
 		}
 		else if (strcmp (pKey, "volume") == 0 || strcmp (pKey, "midi_volume") == 0)

@@ -459,6 +459,7 @@ boolean CKernel::Initialize (void)
 	BareAudioPreferJack (Config.bAudioJack ? TRUE : FALSE);
 	BareAudioSetVolume (Config.nVolume);
 	BareMidiSetVolume (Config.nMidiVolume);
+	BareInputSetMouseSpeed (Config.nMouseSpeed);
 	if (!BareAudioInit (MixerRate, &mInterrupt))
 	{
 		Report ("FAIL: cannot initialise audio");

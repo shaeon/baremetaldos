@@ -332,6 +332,74 @@ inline std::string CmdlineSet (const std::string &Text, const std::string &Key, 
 	return Head + Key + "=" + Value + Text.substr (nEnd);
 }
 
+// --- [autoexec] command lines ----------------------------------------------------
+//
+// "KEYB es 850": a command found by its first word.  Get returns the rest of
+// the line; Set replaces the whole line (the first active one), adds it at the
+// end of [autoexec] when there is none, or removes it when Args is empty.
+
+inline long FindCommand (const CConfText &C, const std::string &Command)
+{
+	for (const auto &L : C.SectionLines ("autoexec"))
+	{
+		const std::string T = Trim (L.second);
+		if (T.empty () || T[0] == '#') continue;
+		const size_t n = T.find_first_of (" \t");
+		if (Lower (T.substr (0, n)) == Lower (Command)) return static_cast<long> (L.first);
+	}
+	return -1;
+}
+
+inline std::string GetCommand (const CConfText &C, const std::string &Command)
+{
+	const long n = FindCommand (C, Command);
+	if (n < 0) return "";
+	for (const auto &L : C.SectionLines ("autoexec"))
+	{
+		if (static_cast<long> (L.first) != n) continue;
+		const std::string T = Trim (L.second);
+		const size_t s = T.find_first_of (" \t");
+		return s == std::string::npos ? "" : Trim (T.substr (s));
+	}
+	return "";
+}
+
+inline void SetCommand (CConfText &C, const std::string &Command, const std::string &Args)
+{
+	const long n = FindCommand (C, Command);
+	const std::string Line = Command + " " + Args;
+	if (n >= 0)
+	{
+		if (Args.empty ()) C.RemoveLine (static_cast<size_t> (n));
+		else C.ReplaceLine (static_cast<size_t> (n), Line);
+		return;
+	}
+	if (Args.empty ()) return;
+
+	// At the end of [autoexec]: after its last line that is not blank.
+	const auto Lines = C.SectionLines ("autoexec");
+	size_t nAt = 0;
+	bool bFound = false;
+	for (const auto &L : Lines)
+	{
+		if (!Trim (L.second).empty ()) { nAt = L.first + 1; bFound = true; }
+	}
+	if (!bFound)
+	{
+		const long nHeader = C.SectionHeader ("autoexec");
+		if (nHeader < 0)
+		{
+			C.InsertLine (C.LineCount (), "[autoexec]");
+			nAt = C.LineCount ();
+		}
+		else
+		{
+			nAt = static_cast<size_t> (nHeader) + 1;
+		}
+	}
+	C.InsertLine (nAt, Line);
+}
+
 // --- [autoexec] MOUNT lines --------------------------------------------------
 //
 // "MOUNT C /dos -freesize 1024": the drive letter is the second word and the

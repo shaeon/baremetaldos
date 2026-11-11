@@ -67,6 +67,9 @@ u8 s_LastKeys[6] = { 0, 0, 0, 0, 0, 0 };
 
 // Mouse state accumulated since the last poll.
 int s_nMouseDX = 0;
+unsigned s_nMouseSpeed = 100;		// percent, boot.conf mouse_speed
+int s_nMouseRestX = 0;			// the part of a step carried to the next poll
+int s_nMouseRestY = 0;
 int s_nMouseDY = 0;
 u32 s_nMouseButtons = 0;
 
@@ -770,6 +773,19 @@ void BareInputPoll (void)
 	// Hand the accumulated mouse state to the core.  The core asks for it
 	// through input_cb() right after this returns, and clears our deltas as
 	// it reads them.
+	// Mouse speed (boot.conf mouse_speed, the menu): scale the movement, and
+	// keep what does not make a whole step for the next poll, so that a slow
+	// setting still moves on small motions instead of rounding them away.
+	if (s_nMouseSpeed != 100)
+	{
+		const int nX = s_nMouseDX * static_cast<int> (s_nMouseSpeed) + s_nMouseRestX;
+		const int nY = s_nMouseDY * static_cast<int> (s_nMouseSpeed) + s_nMouseRestY;
+		s_nMouseDX = nX / 100;
+		s_nMouseDY = nY / 100;
+		s_nMouseRestX = nX % 100;
+		s_nMouseRestY = nY % 100;
+	}
+
 	BarePushMouse (s_nMouseDX, s_nMouseDY, s_nMouseButtons);
 	s_nMouseDX = 0;
 	s_nMouseDY = 0;
@@ -857,4 +873,10 @@ extern "C" s16 BareJoypadAxis (unsigned nIndex, unsigned nId)
 	// s16 and not int16_t: see the note in bare_env.h - this file cannot
 	// assume <cstdint>, and Circle's s16 is the same type libretro specifies.
 	return static_cast<s16> (s_nPadAxis[nSlot]);
+}
+
+void BareInputSetMouseSpeed (unsigned nPercent)
+{
+	s_nMouseSpeed = nPercent < 25 ? 25 : nPercent > 400 ? 400 : nPercent;
+	s_nMouseRestX = s_nMouseRestY = 0;
 }

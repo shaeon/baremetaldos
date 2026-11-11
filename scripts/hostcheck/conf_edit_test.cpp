@@ -119,6 +119,20 @@ int main (int argc, char **argv)
 		Check (N.Text () == "[dosbox]\nmemsize=16\n[autoexec]\nMOUNT C /dos\n", "no [autoexec]: it is created");
 	}
 
+	std::printf ("[autoexec] commands\n");
+	{
+		const std::string Orig = "[autoexec]\nMOUNT C /dos\nC:\n#KEYB us\nKEYB es 850\n\n";
+		CConfText C (Orig, false);
+		Check (GetCommand (C, "keyb") == "es 850", "reads a command's arguments, a commented one ignored");
+		SetCommand (C, "KEYB", "us");
+		Check (C.Text () == "[autoexec]\nMOUNT C /dos\nC:\n#KEYB us\nKEYB us\n\n", "replaces the whole active line");
+		SetCommand (C, "KEYB", "");
+		Check (C.Text () == "[autoexec]\nMOUNT C /dos\nC:\n#KEYB us\n\n", "empty arguments remove the line");
+		SetCommand (C, "KEYB", "de 850");
+		Check (C.Text () == "[autoexec]\nMOUNT C /dos\nC:\n#KEYB us\nKEYB de 850\n\n",
+		       "a missing command goes after the last non-blank line of [autoexec]");
+	}
+
 	std::printf ("cmdline.txt\n");
 	{
 		const std::string Orig = "loglevel=4 logdev=tty1 keymap=es width=1280 height=720 socmaxtemp=80\n";
@@ -145,6 +159,7 @@ int main (int argc, char **argv)
 		Check (!Dos.empty () && D.Text () == Dos, "sd/dosbox.conf round-trips unchanged");
 		Check (D.Get ("dosbox", "memsize", &v), "sd/dosbox.conf: [dosbox] memsize read");
 		Check (GetMount (D, 'c') == "/dos", "sd/dosbox.conf: MOUNT C read from [autoexec]");
+		Check (GetCommand (D, "keyb") == "es 850", "sd/dosbox.conf: KEYB read from [autoexec]");
 	}
 
 	std::printf ("\n%u failures\n", s_nFailures);

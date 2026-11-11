@@ -222,6 +222,12 @@ enum TSettingId
 	SetSoundFont,		// [midi] midiconfig when mididevice = fluidsynth
 	SetMT32Model,		// [midi] midiconfig when mididevice = mt32
 	SetMidiVolume,
+
+	SetKeyb = 400,			// [autoexec] KEYB line
+	SetMouseSpeed,
+	SetJoyType,
+	SetJoyTimed,
+	SetJoyDeadzone,
 };
 
 void LiveScaler (const std::string &Value)
@@ -261,6 +267,23 @@ void LiveVolume (const std::string &Value)
 void LiveMidiVolume (const std::string &Value)
 {
 	BareMidiSetVolume (static_cast<unsigned> (atoi (Value.c_str ())));
+}
+
+void LiveMouseSpeed (const std::string &Value)
+{
+	BareInputSetMouseSpeed (static_cast<unsigned> (atoi (Value.c_str ())));
+}
+
+// "es  850" -> "es 850": KEYB arguments compared word by word.
+std::string NormaliseWords (const std::string &In)
+{
+	std::string Out;
+	for (const std::string &W : bareconf::Words (bareconf::Lower (In)))
+	{
+		if (!Out.empty ()) Out += ' ';
+		Out += W;
+	}
+	return Out;
 }
 
 // The SoundFonts on the card, for the SoundFont setting: every .sf2 in
@@ -503,6 +526,49 @@ void DefineSettings (void)
 		  { "125 %", "125" }, { "150 %", "150" }, { "200 %", "200" } },
 		3, LiveMidiVolume });
 
+	// --- Entrada ------------------------------------------------------------
+
+	s_Settings.push_back ({ SetKeyb, FileDOSBox, "autoexec", "keyb", "Teclado",
+		"La distribución de teclado de DOS (KEYB en el autoexec de dosbox.conf). El "
+		"teclado USB envía posiciones físicas: esto decide qué carácter da cada tecla. "
+		"Ninguna deja el teclado de EE. UU. de DOS.",
+		TApply::RestartDOSBox,
+		{ { "España", "es 850" }, { "Latinoamérica", "la 850" }, { "EE. UU.", "us" },
+		  { "Reino Unido", "uk 850" }, { "Francia", "fr 850" }, { "Alemania", "gr 850" },
+		  { "Italia", "it 850" }, { "Portugal", "po 860" }, { "Brasil", "br 850" },
+		  { "Ninguna", "" } },
+		0, nullptr });
+
+	s_Settings.push_back ({ SetMouseSpeed, FileBoot, "", "mouse_speed", "Velocidad del ratón",
+		"Cuánto se mueve el puntero de DOS por cada movimiento del ratón USB. Se nota al "
+		"momento al volver al juego.",
+		TApply::Now,
+		{ { "25 %", "25" }, { "50 %", "50" }, { "75 %", "75" }, { "100 %", "100" },
+		  { "125 %", "125" }, { "150 %", "150" }, { "200 %", "200" }, { "300 %", "300" },
+		  { "400 %", "400" } },
+		3, LiveMouseSpeed });
+
+	s_Settings.push_back ({ SetJoyType, FileDOSBox, "joystick", "joysticktype", "Joystick",
+		"El joystick que ve DOS, hecho con los mandos USB. 2 ejes: el de dos botones de "
+		"siempre; 4 ejes: dos sticks; FCS y CH: los de los simuladores de vuelo. "
+		"Ninguno: algunos juegos se cuelgan si buscan joystick y no hay.",
+		TApply::RestartDOSBox,
+		{ { "Ninguno", "none" }, { "Auto", "auto" }, { "2 ejes", "2axis" }, { "4 ejes", "4axis" },
+		  { "4 ejes (2.º mando)", "4axis_2" }, { "Thrustmaster FCS", "fcs" }, { "CH Flightstick", "ch" } },
+		0, nullptr });
+
+	s_Settings.push_back ({ SetJoyTimed, FileDOSBox, "joystick", "timed", "  Ejes temporizados",
+		"Cómo mide DOS los ejes. Si el joystick deriva hacia un lado, prueba a cambiarlo.",
+		TApply::RestartDOSBox, { { "Sí", "true" }, { "No", "false" } }, 0, nullptr });
+
+	s_Settings.push_back ({ SetJoyDeadzone, FileDOSBox, "joystick", "deadzone", "  Zona muerta",
+		"Cuánto hay que mover el stick, en %, antes de que DOS lo note. Súbela si el "
+		"mando se mueve solo.",
+		TApply::RestartDOSBox,
+		{ { "0 %", "0" }, { "5 %", "5" }, { "10 %", "10" }, { "15 %", "15" }, { "20 %", "20" },
+		  { "25 %", "25" }, { "30 %", "30" } },
+		2, nullptr });
+
 	// The default SoundFont: default.sf2 if the card has it.
 	if (TSetting *pFont = FindSetting (SetSoundFont))
 	{
@@ -609,6 +675,11 @@ void LoadSettings (void)
 		else if (S.File == FileBoot)
 		{
 			bFound = BootConf.Get (S.pSection, S.pKey, &Value);
+		}
+		else if (S.nId == SetKeyb)
+		{
+			Value = NormaliseWords (bareconf::GetCommand (DOSBoxConf, "keyb"));
+			bFound = true;		// no KEYB line is the "Ninguna" choice
 		}
 		else if (S.nId == SetSoundFont || S.nId == SetMT32Model)
 		{
@@ -785,6 +856,14 @@ bool SaveSettings (void)
 			if (S.nId == SetSoundFont || S.nId == SetMT32Model)
 			{
 				continue;		// written below, for the device chosen
+			}
+			if (S.nId == SetKeyb)
+			{
+				if (S.nPending != S.nSaved)
+				{
+					bareconf::SetCommand (Conf, "KEYB", S.Choices[S.nPending].Value);
+				}
+				continue;
 			}
 			if (S.nPending != S.nSaved && S.File == FileDOSBox)
 			{
@@ -1271,13 +1350,29 @@ void BuildPages (void)
 		Pages.push_back (P);
 	}
 
-	Pages.push_back (PagePlanned ("Entrada", "Teclado, ratón, joystick y mandos.",
 	{
-		{ "Distribución del teclado", TApply::RestartDOSBox },
-		{ "Sensibilidad del ratón", TApply::Now },
-		{ "Tipo de joystick", TApply::RestartDOSBox },
-		{ "Mandos", TApply::Now },
-	}));
+		TPage P;
+		P.Title = "Entrada";
+		P.Help = "Teclado, ratón, joystick y mandos.";
+		const unsigned nPads = BareInputGamepads ();
+		P.Items =
+		{
+			Section ("Teclado y ratón"),
+			SettingItem (*FindSetting (SetKeyb)),
+			SettingItem (*FindSetting (SetMouseSpeed)),
+			Section ("Joystick"),
+			SettingItem (*FindSetting (SetJoyType)),
+			SettingItem (*FindSetting (SetJoyTimed)),
+			SettingItem (*FindSetting (SetJoyDeadzone)),
+			Info ("Mandos USB conectados", nPads == 0 ? std::string ("ninguno")
+							   : Format ("%u", nPads),
+			      "Los mandos que la placa ve ahora. Si conectas uno con el juego en marcha, "
+			      "aparece aquí."),
+			Planned ("Asignar botones", "Llegará en un paso próximo del menú: qué botón del "
+				 "mando es cada botón del joystick, guardado por mando."),
+		};
+		Pages.push_back (P);
+	}
 
 	Pages.push_back (PagePlanned ("Rendimiento", "Reloj de la placa y temperatura.",
 	{
