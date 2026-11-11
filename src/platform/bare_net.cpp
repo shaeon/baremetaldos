@@ -431,3 +431,25 @@ unsigned BareNetWiFiNetworks (TBareWiFiNetwork *pOut, unsigned nMax)
 	memcpy (pOut, Sorted, n * sizeof *pOut);
 	return n;
 }
+
+boolean BareNetWiFiConfigured (void)
+{
+	// A wpa_supplicant.conf with a network that is not the template's.
+	FILE *pFile = fopen ("SD:/wpa_supplicant.conf", "r");
+	if (pFile == nullptr)
+	{
+		return FALSE;
+	}
+	char Line[160];
+	bool bNetwork = false, bTemplate = false;
+	while (fgets (Line, sizeof Line, pFile) != nullptr)
+	{
+		const char *p = Line;
+		while (*p == ' ' || *p == '\t') p++;
+		if (*p == '#') continue;
+		if (strncmp (p, "network=", 8) == 0) bNetwork = true;
+		if (strstr (p, "ssid=\"NombreDeTuRed\"") != nullptr) bTemplate = true;
+	}
+	fclose (pFile);
+	return bNetwork && !bTemplate ? TRUE : FALSE;
+}

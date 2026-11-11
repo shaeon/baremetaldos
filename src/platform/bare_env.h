@@ -460,6 +460,9 @@ struct TBareWiFiNetwork
 ///\t   network = wifi (the scans are wpa_supplicant's own).
 unsigned BareNetWiFiNetworks (TBareWiFiNetwork *pOut, unsigned nMax);
 
+/// \brief SD:/wpa_supplicant.conf names a network that is not the template's.
+boolean BareNetWiFiConfigured (void);
+
 // ---------------------------------------------------------------------------
 // Secondary cores - bare_cores.cpp
 // ---------------------------------------------------------------------------

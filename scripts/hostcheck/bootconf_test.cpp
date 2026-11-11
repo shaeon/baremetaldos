@@ -335,15 +335,16 @@ int main (void)
 				  unsigned nPrefix; const char *pHost; const char *pWarn; };
 		static const TNetCase NetCases[] =
 		{
-			{ "red: por defecto apagada", "display = 1280x720\n", 0, true, "0.0.0.0", 24, "bmdos", nullptr },
+			{ "red: por defecto wifi", "display = 1280x720\n", 2, true, "0.0.0.0", 24, "bmdos", nullptr },
+			{ "red: apagada a mano", "network = off\n", 0, true, "0.0.0.0", 24, "bmdos", nullptr },
 			{ "red: wifi con dhcp", "network = wifi\nip = dhcp\n", 2, true, "0.0.0.0", 24, "bmdos", nullptr },
 			{ "red: ethernet con ip fija", "network = ethernet\nip = 192.168.1.50/24\ngateway = 192.168.1.1\ndns = 8.8.8.8\nhostname = salon-pc\n",
 			  1, false, "192.168.1.50", 24, "salon-pc", nullptr },
-			{ "red: ip sin prefijo", "ip = 10.0.0.7\n", 0, false, "10.0.0.7", 24, "bmdos", nullptr },
-			{ "red: ip invalida", "ip = 300.1.1.1/24\n", 0, true, "0.0.0.0", 24, "bmdos", "ip" },
-			{ "red: prefijo invalido", "ip = 10.0.0.7/40\n", 0, true, "0.0.0.0", 24, "bmdos", "ip" },
-			{ "red: tipo desconocido", "network = 5g\n", 0, true, "0.0.0.0", 24, "bmdos", "network" },
-			{ "red: hostname invalido", "hostname = mi-pc!\n", 0, true, "0.0.0.0", 24, "bmdos", "hostname" },
+			{ "red: ip sin prefijo", "ip = 10.0.0.7\n", 2, false, "10.0.0.7", 24, "bmdos", nullptr },
+			{ "red: ip invalida", "ip = 300.1.1.1/24\n", 2, true, "0.0.0.0", 24, "bmdos", "ip" },
+			{ "red: prefijo invalido", "ip = 10.0.0.7/40\n", 2, true, "0.0.0.0", 24, "bmdos", "ip" },
+			{ "red: tipo desconocido", "network = 5g\n", 2, true, "0.0.0.0", 24, "bmdos", "network" },
+			{ "red: hostname invalido", "hostname = mi-pc!\n", 2, true, "0.0.0.0", 24, "bmdos", "hostname" },
 		};
 		for (const TNetCase &Case : NetCases)
 		{

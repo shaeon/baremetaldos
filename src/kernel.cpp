@@ -543,7 +543,11 @@ boolean CKernel::Initialize (void)
 	// --- the time, before DOSBox reads it ----------------------------------
 	// DOSBox sets DOS's clock once, when its BIOS starts; the board has no
 	// clock of its own, so with the network on, give NTP a few seconds.
-	if (Config.Network != TBootConfig::NetOff)
+	// With WiFi on (the default) but no network chosen yet, nothing will
+	// answer: no wait, on a card fresh out of make-sd or GitHub.
+	const boolean bExpectNet = Config.Network == TBootConfig::NetEthernet
+				   || (Config.Network == TBootConfig::NetWiFi && BareNetWiFiConfigured ());
+	if (bExpectNet)
 	{
 		char Now[48];
 		const boolean bTime = BareNetWaitForTime (8000);

@@ -276,7 +276,7 @@ void ReadBootConfig (TBootConfig *pConfig)
 	pConfig->nMouseSpeed = 100;
 	pConfig->nSetupWait = 2;
 	strcpy (pConfig->TimeZone, "UTC0");
-	pConfig->Network = TBootConfig::NetOff;
+	pConfig->Network = TBootConfig::NetWiFi;	// on unless switched off
 	strcpy (pConfig->Hostname, "bmdos");
 	pConfig->bDHCP = true;
 	memset (pConfig->IP, 0, sizeof pConfig->IP);

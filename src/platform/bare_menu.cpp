@@ -664,9 +664,9 @@ void DefineSettings (void)
 	s_Settings.push_back ({ SetNetwork, FileBoot, "", "network", "Conexión",
 		"La red de la placa. Ethernet: el puerto de red. WiFi: la red de "
 		"SD:/wpa_supplicant.conf, con el firmware del chip en SD:/firmware/. Ninguna: "
-		"el arranque no la toca (es lo más rápido).",
+		"el arranque no la toca. Viene en WiFi; quien no quiera red, Ninguna.",
 		TApply::RestartBoard,
-		{ { "Ninguna", "off" }, { "Ethernet", "ethernet" }, { "WiFi", "wifi" } }, 0, nullptr });
+		{ { "Ninguna", "off" }, { "Ethernet", "ethernet" }, { "WiFi", "wifi" } }, 2, nullptr });
 
 	s_Settings.push_back ({ SetWiFiCountry, FileBoot, "", "", "País del WiFi",
 		"Decide qué canales puede usar el WiFi (en Europa, del 1 al 13). Se escribe en "
