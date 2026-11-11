@@ -200,6 +200,11 @@ struct TBootConfig
 	// daylight saving, "CET-1CEST,M3.5.0,M10.5.0/3" for peninsular Spain.
 	char TimeZone[64];
 
+	// The card's web server (bare_web.cpp): off by default - it can write
+	// and delete on the card.  An optional password (Basic auth, any user).
+	bool bWebServer;
+	char WebPassword[33];
+
 	// The board's own network (bare_net.cpp): off (default), the Ethernet
 	// port, or WiFi (SD:/wpa_supplicant.conf + firmware in SD:/firmware/).
 	// ip = dhcp, or a fixed address with its prefix ("192.168.1.50/24") and
@@ -276,6 +281,8 @@ void ReadBootConfig (TBootConfig *pConfig)
 	pConfig->nMouseSpeed = 100;
 	pConfig->nSetupWait = 2;
 	strcpy (pConfig->TimeZone, "UTC0");
+	pConfig->bWebServer = false;
+	pConfig->WebPassword[0] = '\0';
 	pConfig->Network = TBootConfig::NetWiFi;	// on unless switched off
 	strcpy (pConfig->Hostname, "bmdos");
 	pConfig->bDHCP = true;
@@ -465,6 +472,22 @@ void ReadBootConfig (TBootConfig *pConfig)
 				memcpy (strcmp (pKey, "dns") == 0 ? pConfig->DNS : pConfig->Gateway, Addr, 4);
 			else
 				BootConfigWarn (pConfig, "boot.conf: %s \"%s\" is not an address", pKey, pValue);
+		}
+		else if (strcmp (pKey, "web_server") == 0)
+		{
+			if (strcmp (pValue, "on") == 0 || strcmp (pValue, "off") == 0)
+				pConfig->bWebServer = strcmp (pValue, "on") == 0;
+			else
+				BootConfigWarn (pConfig, "boot.conf: unknown web_server \"%s\" (on|off)", pValue);
+		}
+		else if (strcmp (pKey, "web_password") == 0)
+		{
+			// Printable ASCII without spaces, at most 32: what fits in Basic
+			// auth and on a line of boot.conf ('#' would start a comment).
+			bool bOk = strlen (pValue) < sizeof pConfig->WebPassword;
+			for (const char *p = pValue; bOk && *p; p++) bOk = *p > ' ' && *p < 0x7F && *p != '#';
+			if (bOk) strcpy (pConfig->WebPassword, pValue);
+			else BootConfigWarn (pConfig, "boot.conf: web_password must be 1-32 printable characters, no spaces or #");
 		}
 		else if (strcmp (pKey, "timezone") == 0)
 		{

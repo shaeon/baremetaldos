@@ -601,6 +601,7 @@ APP_SRCS := \
 	src/platform/bare_cores.cpp \
 	src/platform/bare_menu.cpp \
 	src/platform/bare_net.cpp \
+	src/platform/bare_web.cpp \
 	src/platform/bare_sdlnet.cpp \
 	src/platform/bare_midi.cpp \
 	src/dosbox-stub/midi_stub.cpp \
@@ -1343,6 +1344,14 @@ check-conf:
 		-o build/conf_edit_test scripts/hostcheck/conf_edit_test.cpp
 	@build/conf_edit_test sd
 
+# The web server's request parsing, path rules, escaping and Base64 (web_util.h).
+.PHONY: check-web
+check-web:
+	@mkdir -p build
+	@$(HOST_CXX) -std=gnu++23 -O1 -Wall -Wextra -Wpedantic -Wshadow \
+		-o build/web_util_test scripts/hostcheck/web_util_test.cpp
+	@build/web_util_test
+
 # The setup menu's model and layout (menu_model.h): pages, cursor, keys, and
 # the 80x30 grid.
 .PHONY: check-menu
@@ -1439,7 +1448,7 @@ check-dynarec-hook:
 # config parser.  This is the target to run before a cross build.
 check-host: check-platform check-kernel check-bootconf check-scaling check-dynarec \
             check-coreopts check-resample check-storage check-governor check-portorder \
-            check-dynarec-hook check-midi check-frames check-audio check-scale check-menu check-conf
+            check-dynarec-hook check-midi check-frames check-audio check-scale check-menu check-conf check-web
 print-srcs:
 	@echo $(ALL_SRCS)
 

@@ -104,6 +104,7 @@ enum TActionId
 	ActCDEject,
 	ActBootGame,
 	ActBootPrompt,
+	ActWebPassword,
 	ActWiFiList,
 	ActWiFiManual,
 	ActWiFiRescan,
@@ -174,7 +175,13 @@ enum TDialogId
 	DlgInfo,		// Aceptar, nothing to do after it
 	InWiFiPassword = 50,	// text input: the password of s_WiFiSSID
 	InWiFiSSID,		// text input: a network's name, typed
+	InWebPassword,		// text input: the web server's password
 };
+
+// The web server's password (boot.conf web_password), a free string like the
+// folder drives; "" = none.
+std::string s_WebPassSaved;
+std::string s_WebPassPending;
 
 // --- choosing a WiFi network -------------------------------------------------
 //
@@ -277,6 +284,7 @@ enum TSettingId
 	SetNetIP,
 	SetTimeZone,
 	SetWiFiCountry,			// wpa_supplicant.conf country=
+	SetWebServer,
 	SetSerial1,
 	SetSerial2,
 	SetIPX,
@@ -677,6 +685,13 @@ void DefineSettings (void)
 		  { "Reino Unido", "GB" }, { "Francia", "FR" }, { "Alemania", "DE" }, { "Italia", "IT" } },
 		0, nullptr });
 
+	s_Settings.push_back ({ SetWebServer, FileBoot, "", "web_server", "Servidor web",
+		"La tarjeta desde el navegador de cualquier ordenador de la misma red: ver "
+		"carpetas, bajar, subir ficheros o carpetas enteras (arrastrándolas), crear y "
+		"borrar. Apagado por defecto: puede escribir y borrar en la tarjeta. Mejor "
+		"con contraseña.",
+		TApply::RestartBoard, { { "Apagado", "off" }, { "Encendido", "on" } }, 0, nullptr });
+
 	s_Settings.push_back ({ SetTimeZone, FileBoot, "", "timezone", "Zona horaria",
 		"La hora de DOS: la de la red (NTP) en esta zona, con el cambio de verano. DOS "
 		"la toma al arrancar, así que se aplica al reiniciar. Otra zona se escribe en "
@@ -842,6 +857,12 @@ void LoadSettings (void)
 	const bareconf::CConfText BootConf (Boot, true);
 	const bareconf::CConfText DOSBoxConf (DOSBox, false);
 
+	{
+		std::string Pass;
+		BootConf.Get ("", "web_password", &Pass);
+		s_WebPassSaved = s_WebPassPending = bareconf::Trim (Pass);
+	}
+
 	s_DriveC.Saved = s_DriveC.Pending = bareconf::GetMount (DOSBoxConf, 'C');
 	s_DriveE.Saved = s_DriveE.Pending = bareconf::GetMount (DOSBoxConf, 'E');
 
@@ -990,7 +1011,7 @@ bool AnyModified (void)
 		if (S.nPending != S.nSaved) return true;
 	}
 	return s_DriveC.Pending != s_DriveC.Saved || s_DriveE.Pending != s_DriveE.Saved
-	       || s_BootPending != s_BootSaved;
+	       || s_BootPending != s_BootSaved || s_WebPassPending != s_WebPassSaved;
 }
 
 bool ModifiedNeedsBoard (void)
@@ -1004,9 +1025,9 @@ bool ModifiedNeedsBoard (void)
 		if (S.nPending != S.nSaved
 		    && (S.Apply == TApply::RestartBoard || S.Apply == TApply::RestartDOSBox)) return true;
 	}
-	// The drives and the boot program are R too.
+	// The drives and the boot program are R too, the web password B.
 	return s_DriveC.Pending != s_DriveC.Saved || s_DriveE.Pending != s_DriveE.Saved
-	       || s_BootPending != s_BootSaved;
+	       || s_BootPending != s_BootSaved || s_WebPassPending != s_WebPassSaved;
 }
 
 void SetPending (TSetting &S, unsigned nChoice)
@@ -1023,6 +1044,7 @@ void Discard (void)
 	s_DriveC.Pending = s_DriveC.Saved;
 	s_DriveE.Pending = s_DriveE.Saved;
 	s_BootPending = s_BootSaved;
+	s_WebPassPending = s_WebPassSaved;
 
 	for (TSetting &S : s_Settings)
 	{
@@ -1038,6 +1060,7 @@ void LoadDefaults (void)
 	s_DriveC.Pending = s_DriveC.Default;
 	s_DriveE.Pending = s_DriveE.Default;
 	s_BootPending.clear ();
+	s_WebPassPending.clear ();
 
 	for (TSetting &S : s_Settings)
 	{
@@ -1058,6 +1081,7 @@ bool SaveSettings (void)
 	{
 		if (S.nPending == S.nSaved) continue;
 		if (S.nId == SetDisplay) { bCmdline = true; bBoot = true; }
+
 		else if (S.File == FileCmdline) bCmdline = true;
 		else if (S.File == FileBoot) bBoot = true;
 		else if (S.File == FileDOSBox) bDOSBox = true;
@@ -1066,6 +1090,10 @@ bool SaveSettings (void)
 	    || s_BootPending != s_BootSaved)
 	{
 		bDOSBox = true;
+	}
+	if (s_WebPassPending != s_WebPassSaved)
+	{
+		bBoot = true;
 	}
 
 	if (bCmdline)
@@ -1100,6 +1128,7 @@ bool SaveSettings (void)
 			if (S.nPending == S.nSaved) continue;
 			if (S.nId == SetDisplay) Conf.Set ("", "display", S.Choices[S.nPending].Value);
 			else if (S.nId == SetWiFiCountry) continue;	// lives in wpa_supplicant.conf
+
 			else if (S.File == FileBoot) Conf.Set (S.pSection, S.pKey, S.Choices[S.nPending].Value);
 			if (S.nId == SetNetIP && !s_NetCurrentChoice.empty ()
 			    && S.Choices[S.nPending].Value == s_NetCurrentChoice)
@@ -1107,6 +1136,10 @@ bool SaveSettings (void)
 				if (!s_NetCurrentGateway.empty ()) Conf.Set ("", "gateway", s_NetCurrentGateway);
 				if (!s_NetCurrentDNS.empty ()) Conf.Set ("", "dns", s_NetCurrentDNS);
 			}
+		}
+		if (s_WebPassPending != s_WebPassSaved)
+		{
+			Conf.Set ("", "web_password", s_WebPassPending);
 		}
 		bOk = WriteText (BootPath, Conf.Text ()) && bOk;
 	}
@@ -1192,6 +1225,7 @@ bool SaveSettings (void)
 	s_DriveC.Saved = s_DriveC.Pending;
 	s_DriveE.Saved = s_DriveE.Pending;
 	s_BootSaved = s_BootPending;
+	s_WebPassSaved = s_WebPassPending;
 
 	CLogger::Get ()->Write (FromMenu, bOk ? LogNotice : LogError,
 				bOk ? "settings saved" : "settings: a file could not be written");
@@ -1856,9 +1890,21 @@ void BuildPages (void)
 			SettingItem (*FindSetting (SetSerial2)),
 			Section ("Juego en red"),
 			SettingItem (*FindSetting (SetIPX)),
-			Section ("Próximamente"),
-			Planned ("Servidor web de la tarjeta", "Copiar juegos desde el navegador del PC.",
-				 TApply::RestartBoard),
+			Section ("Servidor web"),
+			SettingItem (*FindSetting (SetWebServer)),
+			[] {
+				TItem Pass = Action ("Contraseña", ActWebPassword,
+					"La que pedirá el navegador (cualquier usuario). Vacía: sin "
+					"contraseña. Hasta 32 caracteres, sin espacios ni #. Se guarda "
+					"en boot.conf (web_password).");
+				Pass.Value = s_WebPassPending.empty () ? "(ninguna)" : "********";
+				Pass.Apply = TApply::RestartBoard;
+				Pass.bModified = s_WebPassPending != s_WebPassSaved;
+				return Pass;
+			} (),
+			Info ("Dirección", BareWebRunning () && BareNetReady () && Net.IP[0] != '\0'
+				? Format ("http://%s/", Net.IP) : std::string ("(apagado o sin red)"),
+				"Escríbela en el navegador de un ordenador de la misma red."),
 		};
 		Pages.push_back (P);
 	}
@@ -2138,6 +2184,22 @@ void HandleEvent (const TEvent &Ev)
 					  "", true, 0, 63);
 			return;
 		}
+		if (Ev.nId == InWebPassword)
+		{
+			// What boot.conf's reader accepts: printable ASCII, no spaces,
+			// no '#' (a comment there).  Accents and ñ would be dropped at boot.
+			bool bOk = true;
+			for (unsigned char c : Ev.Text) bOk = bOk && c > ' ' && c < 0x7F && c != '#';
+			if (!bOk)
+			{
+				s_Menu.OpenDialog (DlgInfo, "Contraseña no válida",
+						   "Solo letras sin acento, números y símbolos, sin espacios ni #: "
+						   "boot.conf no guarda otra cosa.", { "Aceptar" });
+				return;
+			}
+			s_WebPassPending = Ev.Text;
+			return;
+		}
 		if (Ev.nId == InWiFiPassword)
 		{
 			if (Ev.Text.empty ()) s_bWiFiSecure = false;
@@ -2209,6 +2271,10 @@ void HandleEvent (const TEvent &Ev)
 			break;
 		case ActDriveE:
 			BrowseStart (TBrowse::FolderE, s_DriveE.Pending.empty () ? "/" : s_DriveE.Pending);
+			break;
+		case ActWebPassword:
+			s_Menu.OpenInput (InWebPassword, "Servidor web", "Contraseña (vacía: ninguna):",
+					  s_WebPassPending, true, 0, 32);
 			break;
 		case ActWiFiList:
 			s_bWiFiList = true;

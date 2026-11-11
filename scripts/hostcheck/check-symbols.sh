@@ -101,6 +101,9 @@ BareNetSocketsReady
 BareNetLocalTime
 BareNetWiFiNetworks
 BareNetWiFiConfigured
+# The card's web server (bare_web.cpp): built for the board only, like bare_net.
+BareWebStart
+BareWebRunning
 BareCorePaused
 BareCoreRunFrame
 BareCoreSetFrameHook

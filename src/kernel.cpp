@@ -524,6 +524,15 @@ boolean CKernel::Initialize (void)
 			BareNetInit (&Net) ? "arrancando en segundo plano" : BareNetState ());
 	}
 
+	// The card's web server: a task that waits for the network by itself.
+	if (Config.bWebServer)
+	{
+		Report ("web: %s", BareWebStart (Config.WebPassword, 80)
+			? (Config.WebPassword[0] ? "servidor de la tarjeta, con contraseña"
+						 : "servidor de la tarjeta, sin contraseña")
+			: "no, la red está apagada");
+	}
+
 	// --- SUPR / F2: the setup menu before DOSBox starts -----------------------
 	// Like a PC's BIOS: a short window to get into the setup, for the settings
 	// that only apply before DOSBox exists.  Win+F12 opens it later as well.

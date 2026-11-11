@@ -464,6 +464,17 @@ unsigned BareNetWiFiNetworks (TBareWiFiNetwork *pOut, unsigned nMax);
 boolean BareNetWiFiConfigured (void);
 
 // ---------------------------------------------------------------------------
+// The card's web server - bare_web.cpp (boot.conf web_server, web_password)
+// ---------------------------------------------------------------------------
+
+/// \brief Start it (a task; it waits for the network).  pPassword "" = none.
+///\t   FALSE with the network off.
+boolean BareWebStart (const char *pPassword, unsigned nPort);
+
+/// \brief Listening.
+boolean BareWebRunning (void);
+
+// ---------------------------------------------------------------------------
 // Secondary cores - bare_cores.cpp
 // ---------------------------------------------------------------------------
 

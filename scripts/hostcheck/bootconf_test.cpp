@@ -180,6 +180,8 @@ static const TAudioCase AudioCases[] =
 	{ "hora: zona de Espana", "timezone = CET-1CEST,M3.5.0,M10.5.0/3\n", false, 100, 100, nullptr },
 	{ "hora: zona con nombre entre <>", "timezone = <-03>3\n", false, 100, 100, nullptr },
 	{ "hora: zona invalida", "timezone = Europe/Madrid hora\n", false, 100, 100, "timezone" },
+	{ "web: encendido con clave", "web_server = on\nweb_password = s3cr3t!\n", false, 100, 100, nullptr },
+	{ "web: valor desconocido", "web_server = si\n", false, 100, 100, "web_server" },
 };
 
 static const TScaleCase ScaleCases[] =
@@ -317,6 +319,9 @@ int main (void)
 		Check (Config.nMidiVolume == Case.nMidi, Case.pName, "midi_volume");
 		Check (Config.nMouseSpeed == (strstr (Case.pContents, "mouse_speed = 200") ? 200u : 100u), Case.pName, "mouse_speed");
 		Check (Config.nSetupWait == (strstr (Case.pContents, "setup_wait = 0") ? 0u : 2u), Case.pName, "setup_wait");
+		Check (Config.bWebServer == (strstr (Case.pContents, "web_server = on") != nullptr), Case.pName, "web_server");
+		Check (strcmp (Config.WebPassword, strstr (Case.pContents, "web_password = s3cr3t!") ? "s3cr3t!" : "") == 0,
+		       Case.pName, "web_password");
 		{
 			const char *pTZ = strstr (Case.pContents, "timezone = ");
 			const bool bValid = pTZ != nullptr && Case.pWarn == nullptr;
