@@ -22,3 +22,7 @@
 // The keyboard map lives in DOSBox-core (libretro_input.cpp) and is the thing
 // that turns a RETROK_* into a DOS scan code.
 unsigned char retro_dosbox_map (unsigned nRetroKey);
+
+// The core's exit flags (libretro.cpp), put back by BareCoreRestart.
+extern bool dosbox_exit;
+extern bool frontend_exit;

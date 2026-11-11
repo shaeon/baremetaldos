@@ -83,6 +83,10 @@ BareCorePollRefreshMilliHz
 BareCoreReleaseAllKeys
 BareCoreRequestShutdown
 BareCoreRequestReboot
+# Restarting DOS without restarting the board (bare_libretro.cpp).
+BareCoreRequestDosRestart
+BareCoreRestart
+BareCoreRestartWanted
 # Disk images through the core's disk control (bare_libretro.cpp).
 BareDiskInsert
 BareDiskEject

@@ -587,15 +587,36 @@ boolean BareMidiInit (unsigned nSampleRate)
 static std::string s_OpenDevice;
 static std::string s_OpenConfig;
 
+// A DOS restart (BareCoreRestart) unloads DOSBox, which closes its MIDI
+// device, and loads it again, which opens it - and opening FluidSynth means
+// reading a SoundFont of tens of megabytes from the card.  While the restart
+// runs, a close only silences the synthesizer and keeps it ("parked"); the
+// open that follows takes it back if it asks for the same device and
+// configuration, and anything else closes it for real.
+static bool s_bKeepOnClose = false;
+static bool s_bParked = false;
+
 boolean BareMidiOpen (const char *pDevice, const char *pConfig)
 {
 	if (pDevice != nullptr && BareMidiActive ()
 	    && s_OpenDevice == pDevice && s_OpenConfig == (pConfig != nullptr ? pConfig : ""))
 	{
+		s_bParked = false;
 		return TRUE;
 	}
 
-	BareMidiClose ();
+	s_bParked = false;
+
+	// Another device or configuration: the one in place (parked or not) is
+	// closed for real.  During a restart BareMidiClose() would only park it
+	// again, and the new synthesizer would be put over it - the old one never
+	// freed, and core 1 possibly still rendering it.
+	{
+		const bool bKeep = s_bKeepOnClose;
+		s_bKeepOnClose = false;
+		BareMidiClose ();
+		s_bKeepOnClose = bKeep;
+	}
 
 #if BARE_MIDI
 	if (pDevice == nullptr || (std::strcmp (pDevice, "mt32") != 0
@@ -650,6 +671,19 @@ boolean BareMidiOpen (const char *pDevice, const char *pConfig)
 
 void BareMidiClose (void)
 {
+	if (s_bKeepOnClose && BareMidiActive ())
+	{
+		// Parked for a DOS restart: every note off, every controller back
+		// to its default, through the same queue a game uses.
+		for (u8 nChannel = 0; nChannel < 16; nChannel++)
+		{
+			BareMidiOutByte (0xB0 | nChannel); BareMidiOutByte (123); BareMidiOutByte (0);
+			BareMidiOutByte (0xB0 | nChannel); BareMidiOutByte (121); BareMidiOutByte (0);
+		}
+		s_bParked = true;
+		return;
+	}
+
 	CBareSynth *pSynth = s_pSynth.exchange (nullptr);
 	if (pSynth == nullptr)
 	{
@@ -788,5 +822,16 @@ void BareMidiSendTestChord (boolean bOn)
 		BareMidiOutByte (bOn ? 0x90 : 0x80);
 		BareMidiOutByte (n);
 		BareMidiOutByte (bOn ? 100 : 0);
+	}
+}
+
+void BareMidiKeepOnClose (boolean bKeep)
+{
+	s_bKeepOnClose = bKeep != FALSE;
+	if (!s_bKeepOnClose && s_bParked)
+	{
+		// Restarted, and the new DOSBox did not ask for it again.
+		s_bParked = false;
+		BareMidiClose ();
 	}
 }

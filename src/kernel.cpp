@@ -1348,6 +1348,24 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		BareCoreRunFrame ();
 		const u64 nCallMicros = BareMicros () - nCallStart;
 
+		// A DOS restart (Ctrl+Alt+Del in the emulated BIOS, a program
+		// rebooting the machine, the setup menu): here, between two frames,
+		// where DOSBox is parked at its frame boundary.  If loading it again
+		// fails, the board restarts instead.
+		if (BareCoreRestartWanted ())
+		{
+			BareMenuShowMessage ("Reiniciando DOS...");
+			if (!BareCoreRestart ())
+			{
+				BareMenuShowMessage ("No se pudo reiniciar DOS: reiniciando la placa");
+				CTimer::SimpleMsDelay (1500);
+				BareCoreRequestReboot ();
+			}
+			nRefStart = BareMicros ();
+			nFrameIndex = 0;
+			continue;
+		}
+
 		// One "now" for everything below that compares against the window.  Read
 		// here, after the call, so the numbers the panel shows describe the frame
 		// that has just happened rather than the one being waited for.

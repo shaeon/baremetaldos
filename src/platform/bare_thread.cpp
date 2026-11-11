@@ -330,6 +330,27 @@ boolean BareThreadExiting (void)
 	return s_bExiting;
 }
 
+/// \brief After a DOS restart's unload: the state of a fresh boot again.  The
+///\t   emulator task has ended (retro_deinit joined it), so nothing reads
+///\t   these while they change.
+void BareThreadResetForRestart (void)
+{
+	s_bExiting = FALSE;
+	s_bAborted = FALSE;
+	s_bHandedOver = FALSE;
+	s_bEmulatorDriving = FALSE;
+	s_LastReason = ThreadSwitchReason::None;
+	s_bLastReasonValid = FALSE;
+	s_nHandBacksSinceReport = 0;
+	s_nFrameDrives = 0;
+	s_nNextDriveMicros = 0;
+
+	// "Microseconds since the emulator last handed back" must not count the
+	// restart itself: 0 means "no hand-back yet", as at power-on.
+	s_nLastHandBackMicros = 0;
+	s_nIdleReports = 0;
+}
+
 // ---------------------------------------------------------------------------
 // The interface DOSBox-core's shim calls
 // ---------------------------------------------------------------------------

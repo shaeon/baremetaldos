@@ -1608,6 +1608,20 @@ fetch:
 		git checkout --quiet $(DOSBOX_REV) && \
 		echo "dosbox-core at $$(git rev-parse --short HEAD)"
 	@echo "pinned revision: $(DOSBOX_REV)"
+	@# The port's patches to dosbox-core (patches/dosbox-core/*.patch), as
+	@# setup.sh does with Circle's: a patch that applies in reverse is already
+	@# there; one that applies neither way stops the build, because building
+	@# without it would give a machine that silently lacks what it adds.
+	@for p in $(CURDIR)/patches/dosbox-core/*.patch; do \
+		[ -f "$$p" ] || continue; \
+		if git -C $(DOSBOX_DIR) apply --reverse --check "$$p" >/dev/null 2>&1; then \
+			echo "  already applied: $$(basename $$p)"; \
+		elif git -C $(DOSBOX_DIR) apply "$$p"; then \
+			echo "  applied: $$(basename $$p)"; \
+		else \
+			echo "cannot apply $$p to dosbox-core at $(DOSBOX_REV)"; exit 1; \
+		fi; \
+	done
 
 # Quick check that the tree we were given is the revision the port expects.
 check-rev:

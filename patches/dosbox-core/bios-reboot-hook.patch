@@ -1,0 +1,50 @@
+diff --git a/src/ints/bios.cpp b/src/ints/bios.cpp
+index 64f3663b..1f587d35 100644
+--- a/src/ints/bios.cpp
++++ b/src/ints/bios.cpp
+@@ -1058,7 +1058,15 @@ static Bitu Default_IRQ_Handler(void) {
+ 	return CBRET_NONE;
+ }
+ 
++// BM-DOS: see bios_keyboard.cpp.  The reset vector, INT 19h and INT 18h end
++// here - which is how programs reboot the machine.
++extern void BIOS_RebootRequested(void) __attribute__((weak));
++
+ static Bitu Reboot_Handler(void) {
++	if (BIOS_RebootRequested) {
++		BIOS_RebootRequested();
++		for (;;) CALLBACK_Idle();
++	}
+ 	// switch to text mode, notify user (let's hope INT10 still works)
+ 	const char* const text = "\n\n   Reboot not supported";
+ 	reg_ax = 0;
+diff --git a/src/ints/bios_keyboard.cpp b/src/ints/bios_keyboard.cpp
+index 2dc669e2..74f95c7f 100644
+--- a/src/ints/bios_keyboard.cpp
++++ b/src/ints/bios_keyboard.cpp
+@@ -232,6 +232,13 @@ static bool check_key(Bit16u &code) {
+ 
+ 
+ /* the scancode is in reg_al */
++// BM-DOS: Ctrl+Alt+Del.  A PC's BIOS reboots when ITS keyboard handler sees
++// the three keys - so a program that takes INT 9 for itself (Windows 3.x) gets
++// them instead, and plain DOS reboots.  DOSBox's BIOS had no reboot; a
++// frontend that can restart the machine provides BIOS_RebootRequested (weak:
++// without one, nothing changes).
++extern void BIOS_RebootRequested(void) __attribute__((weak));
++
+ static Bitu IRQ1_Handler(void) {
+ /* handling of the locks key is difficult as sdl only gives
+  * states for numlock capslock. 
+@@ -243,6 +250,11 @@ static Bitu IRQ1_Handler(void) {
+ 	flags2=mem_readb(BIOS_KEYBOARD_FLAGS2);
+ 	flags3=mem_readb(BIOS_KEYBOARD_FLAGS3);
+ 	leds  =mem_readb(BIOS_KEYBOARD_LEDS); 
++	if (scancode==0x53 && (flags1&0x0c)==0x0c && BIOS_RebootRequested) {
++		/* Ctrl+Alt+Del (either Delete key): ask, then wait as a PC does */
++		BIOS_RebootRequested();
++		for (;;) CALLBACK_Idle();
++	}
+ #ifdef CAN_USE_LOCK
+ 	/* No hack anymore! */
+ #else

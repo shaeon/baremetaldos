@@ -1,0 +1,27 @@
+diff --git a/src/cpu/cpu.cpp b/src/cpu/cpu.cpp
+index 5aebdfae..8cf09e7c 100644
+--- a/src/cpu/cpu.cpp
++++ b/src/cpu/cpu.cpp
+@@ -2197,6 +2197,9 @@ class CPU: public Module_base {
+ private:
+ 	static bool inited;
+ public:
++	// BM-DOS: a machine built again in the same process (the frontend's
++	// restart, see CPU_ForgetInit below) must start from a reset CPU.
++	static void ForgetInit() { inited = false; }
+ 	CPU(Section* configuration):Module_base(configuration) {
+ 		if(inited) {
+ 			Change_Config(configuration);
+@@ -2446,3 +2449,12 @@ void CPU_Init(Section* sec) {
+ }
+ //initialize static members
+ bool CPU::inited=false;
++
++// BM-DOS: after the whole machine has been taken down (every section
++// destroyed, not one changed setting - CPU_ShutDown runs for both, which is
++// why the destructor cannot do this), the next CPU must be a fresh one:
++// registers, CR0, IDT.  Without it a restart that followed a protected-mode
++// game would start the BIOS in protected mode.
++void CPU_ForgetInit(void) {
++	CPU::ForgetInit();
++}

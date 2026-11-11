@@ -367,11 +367,27 @@ void    BareMenuTick (void);
 ///\t   (the boot screen then needs redrawing).  0 seconds returns at once.
 boolean BareMenuBootWindow (unsigned nSeconds);
 
+/// \brief A one-line message on a blue screen, presented like a frame (both
+///\t   video_core modes): "Reiniciando DOS...".
+void    BareMenuShowMessage (const char *pText);
+
 /// \brief For the menu (bare_libretro.cpp): release every key DOS thinks is
 ///\t   down; and the two ways out that Ctrl+F9 and Ctrl+Alt+PetSis use.
 void    BareCoreReleaseAllKeys (void);
 void    BareCoreRequestShutdown (void);
 void    BareCoreRequestReboot (void);
+
+/// \brief Restart DOS - unload DOSBox and load it again, without restarting
+///\t   the board.  Requested by the emulated BIOS (Ctrl+Alt+Del, a program
+///\t   rebooting the machine) or the setup menu; done by the frame loop,
+///\t   between frames, with BareCoreRestart().  FALSE: the load failed (the
+///\t   caller restarts the board instead).
+void    BareCoreRequestDosRestart (void);
+boolean BareCoreRestartWanted (void);
+boolean BareCoreRestart (void);
+
+/// \brief bare_thread.cpp: back to a fresh boot's state after the unload.
+void    BareThreadResetForRestart (void);
 
 /// \brief Disk images through the core's disk control (bare_libretro.cpp):
 ///\t   insert a .img (mounted as A:) or an .iso / .cue (as D:) in place of
@@ -548,6 +564,11 @@ u64     BareMidiBytesIn (void);
 
 /// \brief MIDI volume relative to DOSBox's sound, 25..200 %.  Core 0.
 void    BareMidiSetVolume (unsigned nPercent);
+
+/// \brief During a DOS restart: a close keeps the synthesizer loaded and silent,
+///\t   for the open that follows to take back; FALSE afterwards closes it if
+///\t   nothing did.
+void    BareMidiKeepOnClose (boolean bKeep);
 
 /// \brief The menu's MIDI test: a chord on, or off.
 void    BareMidiSendTestChord (boolean bOn);

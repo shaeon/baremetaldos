@@ -45,25 +45,19 @@ están en local y en el bundle, pendientes de push.
 | (el de "boot: BIOS-style logo, no rainbow splash...") | Logo de arranque original, sin arcoíris (disable_splash), boot_delay=0, NTP 5 s máx., tiempo de arranque en pantalla |
 | (el de "web: password from the page, rename, move, free space") | Servidor web al estilo ZXMetalCircle: contraseña desde la web, renombrar, mover, espacio libre |
 | (el de "fix: the boot stopped after the \"fb:\" lines") | Cuelgue al arrancar (foto del usuario): segunda llamada a CGlueStdioInit (assert) del commit 6ca96f0; quitada.  PROGRESO.md pasa a la raíz |
+| (el de "dos: Ctrl+Alt+Del as on a PC - the BIOS asks...") | Ctrl+Alt+Supr como en un PC: la BIOS emulada pide el reinicio (parche), reinicio de DOS sin reiniciar la placa, CPU y caché del dynarec limpias, MIDI aparcado; R del menú = reiniciar DOS.  **Probar en placa:** 10-20 reinicios seguidos (memoria libre estable), sonido/ratón/CD después, reiniciar tras DOOM (modo protegido), Windows 3.x se queda la combinación. |
 
 ## En curso
 
-- **Apartado, sin aprobar:** trabajo encontrado de un intento interrumpido de
-  "Ctrl+Alt+Supr como en un PC" (parche a DOSBox-core, reinicio de DOS sin
-  reiniciar la placa, menú).  Su nota decía "decidido con el usuario", pero en
-  la conversación el usuario aún no lo había aprobado.  Guardado en
-  `git stash` ("WIP encontrado: Ctrl+Alt+Supr...") y el cambio que había
-  aplicado al árbol de DOSBox-core en `/home/claude/dosbox-core-wip-ctrlaltdel.diff`;
-  el árbol de DOSBox-core se ha devuelto a la revisión fijada.  Retomarlo solo
-  con el visto bueno del usuario (`git stash pop`, revisar, `make fetch` aplica
-  el parche de patches/dosbox-core/).
+- Nada.
 
 ## Pendiente
 
 - Previstos en el menú: asignar botones del mando, lanzador de juegos,
   corrección de aspecto, panel de estado, actualizar desde GitHub.
 - Arreglo del Makefile con GNU Make 4.3 (PATH en `$(shell)`).
-- Probar en placa todo lo del menú y la red (el usuario aún no lo ha probado).
+- Probar en placa todo lo del menú y la red (el usuario aún no lo ha probado),
+  y el reinicio de DOS (ver la fila de Ctrl+Alt+Supr).
 - Llevar el trabajo a Miguel Ángel (mmoroca) como PR.
 
 ## Notas técnicas

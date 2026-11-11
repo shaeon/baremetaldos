@@ -320,19 +320,14 @@ extern "C" void BarePushKey (unsigned nRetroKey, boolean bDown)
 // The emulated machine's own reset, which DOS asks for with Ctrl+Alt+Del
 // ---------------------------------------------------------------------------
 //
-// DOS does not reboot by itself: Ctrl+Alt+Del is a keyboard *interrupt*, and
-// the BIOS answers it by jumping to the reset vector.  DOSBox-core has no such
-// path - the SDL frontend's Restart handler lives in sdlmain.cpp, which is not
-// part of a libretro build, and nothing in the core watches for the sequence.
-// So the port watches for it.
-//
-// It is checked while the keys go down, and the reboot is deferred to the
-// keyboard callback that follows: the emulator task is parked at a frame
-// boundary at that moment and it is safe to touch DOSBox's globals there.  The
-// actual reboot reloads the program from the reset vector, which is what a
-// power-on would do, and it keeps the mounted drives because the mount
-// happened in autoexec - a *soft* reboot is what a PC's Ctrl+Alt+Del gives.
-static boolean s_bRebootArmed = FALSE;
+// As on a PC, the reboot belongs to the BIOS: the keys go to DOS as typed, and
+// the emulated BIOS's keyboard handler asks for the reboot when it sees them
+// (patches/dosbox-core/bios-reboot-hook.patch), as does its reset vector when
+// a program reboots the machine.  A program that takes INT 9 for itself gets
+// the keys and no reboot.  The restart itself is BareCoreRestart, at the end
+// of this file.
+// (s_bRebootArmed and CheckCtrlAltDel were here: the port used to take
+// Ctrl+Alt+Del itself.  The emulated BIOS does it now - see BIOS_RebootRequested.)
 
 // A screenshot was asked for and the frame loop has not taken it yet.
 static boolean s_bScreenshotPending = FALSE;
@@ -362,22 +357,6 @@ extern "C" boolean BareTakeScreenshotRequest (void)
 	return TRUE;
 }
 
-static void CheckCtrlAltDel (unsigned nRetroKey, boolean bDown)
-{
-	if (!bDown)
-	{
-		if (nRetroKey == RETROK_DELETE)
-		{
-			s_bRebootArmed = FALSE;
-		}
-		return;
-	}
-
-	if (IsCtrlDown () && IsAltDown () && nRetroKey == RETROK_DELETE)
-	{
-		s_bRebootArmed = TRUE;
-	}
-}
 
 extern "C" void BareDeliverKey (unsigned nRetroKey, boolean bDown)
 {
@@ -406,18 +385,8 @@ extern "C" void BareDeliverKey (unsigned nRetroKey, boolean bDown)
 	s_nLastKey = nRetroKey;
 	s_bLastKeyDown = bDown;
 
-	// Ctrl+Alt+Del's rebooting did not work, and the reason is worth writing
-	// down: delivering the three-key sequence to the guest is correct, but by
-	// the time it is delivered DOSBox has consumed the Ctrl and Alt presses
-	// and the emulated BIOS only ever sees Delete going down and up on its
-	// own.  What a real machine does with Ctrl+Alt+Del is a *keyboard
-	// interrupt* the BIOS recognises as a whole, and this wrapper cannot
-	// produce that.
-	//
-	// So the emulated machine keeps the plain three keys (DOS apps use them
-	// for themselves), and the reboot a person actually wants - "start this
-	// machine again from scratch" - lives on a key combination no DOS program
-	// uses and no DOSBox hotkey claims.
+	// (Ctrl+Alt+Del: see the note on the emulated machine's reset above; the
+	// port does not take those keys.)
 
 	// PetSis on its own: show or hide the status line.  Started hidden, so the
 	// first press brings it up.  This is a port feature, not a DOS one - the
@@ -553,29 +522,11 @@ extern "C" void BareDeliverKey (unsigned nRetroKey, boolean bDown)
 		return;
 	}
 
-	// Ctrl+Alt+Del: the sequence is consumed here, so DOS never sees the
-	// three keys as typing, and the reboot happens on the Delete press.
-	CheckCtrlAltDel (nRetroKey, bDown);
-	if (s_bRebootArmed)
-	{
-		s_bRebootArmed = FALSE;
-
-		CLogger::Get ()->Write (FromBare, LogNotice, "Ctrl+Alt+Del: rebooting");
-		BareVideoStatusPrint ("Ctrl+Alt+Del: rebooting");
-
-		// NOT retro_reset().  DOSBox-core's retro_reset() does
-		// Control->StartUp() again on the emulator thread - the same call
-		// that builds the machine at power-on - and this port has no way to
-		// know what half-initialised state that leaves behind, while the
-		// screen keeps showing the old machine.  The honest alternative is
-		// to finish the sequence for the guest: the three keys are down, so
-		// the emulated BIOS gets the Delete it was waiting for and resets
-		// itself, which is exactly what a PC does.
-		s_CoreKeyboardCallback.callback (true, RETROK_DELETE, 0, 0);
-		s_CoreKeyboardCallback.callback (false, RETROK_DELETE, 0, 0);
-
-		return;
-	}
+	// Ctrl+Alt+Del is not taken here any more: the three keys go to DOS as
+	// typed, and the emulated BIOS's keyboard handler asks for the reboot
+	// when it sees them (patches/dosbox-core/bios-reboot-hook.patch ->
+	// BIOS_RebootRequested below) - so, as on a PC, plain DOS reboots and a
+	// program that takes the keyboard for itself (Windows 3.x) gets the keys.
 
 	// (There used to be a RETROK_RSHIFT -> RETROK_LSHIFT rewrite here.  It was
 	// wrong twice: retro_dosbox_map *does* contain RETROK_RSHIFT -> KBD_rightshift
@@ -955,8 +906,16 @@ boolean BareCoreInit (void)
 	return TRUE;
 }
 
+// What BareCoreLoadGame was given, for loading it again on a DOS restart.
+static char s_ContentPath[256];
+
 boolean BareCoreLoadGame (const char *pImagePath)
 {
+	if (pImagePath != s_ContentPath)
+	{
+		snprintf (s_ContentPath, sizeof s_ContentPath, "%s", pImagePath != nullptr ? pImagePath : "");
+	}
+
 	retro_game_info game {};
 	game.path = pImagePath;
 	game.data = nullptr;
@@ -1356,4 +1315,122 @@ boolean BareDiskEject (char cDrive)
 boolean BareDiskAvailable (void)
 {
 	return s_bDiskControl;
+}
+
+// ---------------------------------------------------------------------------
+// Restarting DOS without restarting the board
+// ---------------------------------------------------------------------------
+//
+// DOSBox-core keeps the whole machine in a Config object that lives in its
+// emulator thread (libretro.cpp start_dosbox): cancel that thread and DOSBox
+// leaves its loop and the Config's destruction takes every section down in
+// reverse order - the path RetroArch uses to reload content, and the one
+// Ctrl+F9 already takes here (BareCoreDeinit).  A restart is that path, the
+// few flags that stay behind put back, and the load again: dosbox.conf is read
+// again and autoexec runs, as after power-on.
+//
+//   * dosbox-core: retro_deinit() leaves frontend_exit = true and nothing
+//     clears it, so a second load would cancel itself at its first switch;
+//     dosbox_exit likewise.  Both are extern (libretro_dosbox.h).
+//   * this port: its own exit flag (bare_thread.cpp), the keys DOS thought
+//     were down, and the disk images it had put in A: and D:.
+//
+// Asked for by the emulated BIOS (Ctrl+Alt+Del, or a program rebooting the
+// machine) or by the setup menu; done by the frame loop between two frames.
+
+static volatile boolean s_bRestartWanted = FALSE;
+
+// State DOSBox keeps outside its sections, which its own teardown leaves set,
+// and which a machine built again in the same process must not inherit:
+//   * CPU::inited (patches/dosbox-core/cpu-forget-init.patch): without the
+//     reset the new CPU keeps the old registers, CR0 and IDT - a restart
+//     after a protected-mode game would start the BIOS in protected mode;
+//   * the dynrec code cache (build/bare_dynrec_unit.cpp, generated): upstream's
+//     cache_close() is empty, so the new machine would run on the old one's
+//     translated blocks and page handlers.
+// Weak: if the patch is missing, the restart is not attempted at all.
+extern void CPU_ForgetInit (void) __attribute__ ((weak));
+extern "C" void BareDynrecCacheForget (void) __attribute__ ((weak));
+
+// Called from DOSBox's BIOS (the emulator task), through the weak hook the
+// patch adds.  Only a request: the frame loop does the work.
+void BIOS_RebootRequested (void)
+{
+	if (!s_bRestartWanted)
+	{
+		CLogger::Get ()->Write (FromBare, LogNotice, "the emulated machine asks for a reboot");
+	}
+	s_bRestartWanted = TRUE;
+}
+
+void BareCoreRequestDosRestart (void)
+{
+	s_bRestartWanted = TRUE;
+}
+
+boolean BareCoreRestartWanted (void)
+{
+	return s_bRestartWanted;
+}
+
+boolean BareCoreRestart (void)
+{
+	s_bRestartWanted = FALSE;
+
+	// Without the CPU reset the new machine cannot start clean: do not try.
+	// The caller falls back to restarting the board.
+	if (CPU_ForgetInit == nullptr)
+	{
+		CLogger::Get ()->Write (FromBare, LogError,
+					"DOS restart: dosbox-core lacks cpu-forget-init.patch");
+		return FALSE;
+	}
+
+	const u64 nStart = BareMicros ();
+	CLogger::Get ()->Write (FromBare, LogNotice, "restarting DOS");
+
+	BareCoreReleaseAllKeys ();
+
+	// The MIDI synthesizer stays loaded across the restart if DOSBox asks for
+	// the same one again (bare_midi.cpp): no SoundFont read from the card.
+	// DOSBox's unload never closes it (midi_stub.cpp has no close), so it is
+	// parked here, which also silences whatever was playing.
+	BareMidiKeepOnClose (TRUE);
+	BareMidiClose ();
+
+	// Down: the same as Ctrl+F9's, without the halt.
+	BareThreadBeginExit ();
+	retro_unload_game ();
+	retro_deinit ();
+
+	// What stays behind.
+	CPU_ForgetInit ();
+	if (BareDynrecCacheForget != nullptr)
+	{
+		BareDynrecCacheForget ();
+	}
+	frontend_exit = false;
+	dosbox_exit = false;
+	BareThreadResetForRestart ();
+	for (unsigned nKey = 0; nKey < 512; nKey++)
+	{
+		s_KeyState[nKey] = false;
+	}
+	s_bCoreKeyboardCallbackSet = false;
+	s_bDiskControl = FALSE;
+	s_DiskPaths.clear ();
+	s_nDiskInDrive[0] = s_nDiskInDrive[1] = -1;
+
+	// Up again.
+	const boolean bOk = BareCoreInit () && BareCoreLoadGame (s_ContentPath);
+	BareMidiKeepOnClose (FALSE);
+	if (!bOk)
+	{
+		CLogger::Get ()->Write (FromBare, LogError, "DOS restart failed");
+		return FALSE;
+	}
+
+	CLogger::Get ()->Write (FromBare, LogNotice, "DOS restarted in %u ms",
+				static_cast<unsigned> ((BareMicros () - nStart) / 1000));
+	return TRUE;
 }

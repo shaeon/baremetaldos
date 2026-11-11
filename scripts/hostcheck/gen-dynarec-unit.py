@@ -178,6 +178,47 @@ void CPU_Core_Dynrec_Cache_Init (bool enable_cache)
 \t\t\t"fault on its first block, so keep core=normal");
 \t}
 }
+
+/// \\brief Forget the code cache, for a machine built again in the same process
+/// (the port's DOS restart, bare_libretro.cpp BareCoreRestart).
+///
+/// Upstream's cache_close() is empty (its body is commented out) and
+/// cache_initialized stays true, so the next cache_init() returns at once and
+/// the new machine would run on the old machine's translated blocks - and on
+/// code page handlers that point into the old machine's memory, which the
+/// cache puts back into the page tables when it recycles a page.  Called after
+/// the old machine is gone: the page handlers are deleted without being
+/// released (ClearRelease would write the dead paging tables), and the blocks
+/// and the code memory are freed, so that cache_init() builds everything again
+/// and CPU_Core_Dynrec_Cache_Init above makes the new memory executable.
+extern "C" void BareDynrecCacheForget (void)
+{
+\tfor (CodePageHandlerDynRec *p = cache.used_pages; p != nullptr; )
+\t{
+\t\tCodePageHandlerDynRec *pNext = p->next;
+\t\tdelete p;
+\t\tp = pNext;
+\t}
+\tfor (CodePageHandlerDynRec *p = cache.free_pages; p != nullptr; )
+\t{
+\t\tCodePageHandlerDynRec *pNext = p->next;
+\t\tdelete p;
+\t\tp = pNext;
+\t}
+\tcache.used_pages = nullptr;
+\tcache.free_pages = nullptr;
+\tcache.last_page = nullptr;
+
+\tfree (cache_blocks);
+\tcache_blocks = nullptr;
+\tfree (cache_code_start_ptr);
+\tcache_code_start_ptr = nullptr;
+\tcache_code = nullptr;
+\tcache_code_link_blocks = nullptr;
+\tcache_initialized = false;
+
+\tCLogger::Get ()->Write (FromDynarec, LogNotice, "dynrec: code cache forgotten for a restart");
+}
 """
 
 

@@ -91,6 +91,7 @@ enum TActionId
 	ActReboot,
 	ActSave,
 	ActSaveRestart,
+	ActRestartDos,
 	ActDiscard,
 	ActDefaults,
 	ActTestSound,
@@ -170,7 +171,8 @@ enum TDialogId
 {
 	DlgUnsaved = 1,		// Esc with changes: Guardar / Descartar / Seguir
 	DlgDefaults,		// F9: Sí / No
-	DlgRestartNow,		// after saving B settings: Reiniciar ahora / Más tarde
+	DlgRestartNow,		// after saving B settings: Reiniciar la placa / Más tarde
+	DlgRestartDos,		// after saving R settings: Reiniciar DOS ahora / Más tarde
 	DlgSaveFailed,		// Aceptar
 	DlgInfo,		// Aceptar, nothing to do after it
 	InWiFiPassword = 50,	// text input: the password of s_WiFiSSID
@@ -1014,20 +1016,28 @@ bool AnyModified (void)
 	       || s_BootPending != s_BootSaved || s_WebPassPending != s_WebPassSaved;
 }
 
+// B: a change that needs the board restarted (the display mode, the network,
+// the audio output...); the web password is one of them.
 bool ModifiedNeedsBoard (void)
 {
 	for (const TSetting &S : s_Settings)
 	{
-		// R as well as B: DOSBox-core's retro_reset() rebuilds the machine on
-		// the emulator thread from an unknown state (see the Ctrl+Alt+Del
-		// note in bare_libretro.cpp), so for now a DOSBox restart is a board
-		// restart.  The marks stay apart for when that changes.
-		if (S.nPending != S.nSaved
-		    && (S.Apply == TApply::RestartBoard || S.Apply == TApply::RestartDOSBox)) return true;
+		if (S.nPending != S.nSaved && S.Apply == TApply::RestartBoard) return true;
 	}
-	// The drives and the boot program are R too, the web password B.
+	return s_WebPassPending != s_WebPassSaved;
+}
+
+// R: a change DOSBox reads when it starts - it applies by restarting DOS alone
+// (BareCoreRestart: DOSBox unloaded and loaded again, the board keeps running).
+// The drives and the boot program are R.
+bool ModifiedNeedsDos (void)
+{
+	for (const TSetting &S : s_Settings)
+	{
+		if (S.nPending != S.nSaved && S.Apply == TApply::RestartDOSBox) return true;
+	}
 	return s_DriveC.Pending != s_DriveC.Saved || s_DriveE.Pending != s_DriveE.Saved
-	       || s_BootPending != s_BootSaved || s_WebPassPending != s_WebPassSaved;
+	       || s_BootPending != s_BootSaved;
 }
 
 void SetPending (TSetting &S, unsigned nChoice)
@@ -1380,6 +1390,10 @@ TPage PageSalir (void)
 		Action ("Apagado seguro", ActShutdown,
 			"Vacía la tarjeta y detiene la placa, como Ctrl+F9. Espera al mensaje "
 			"antes de quitar la corriente."),
+		Action ("Reiniciar DOS", ActRestartDos,
+			"Como Ctrl+Alt+Supr en MS-DOS: DOS empieza de nuevo (dosbox.conf y su "
+			"autoexec otra vez) en unos segundos, sin reiniciar la placa. Los cambios "
+			"sin guardar del menú se descartan."),
 		Action ("Reiniciar la placa", ActReboot,
 			"Reinicia la Raspberry Pi, como Ctrl+Alt+PetSis."),
 		Section (""),
@@ -1387,7 +1401,7 @@ TPage PageSalir (void)
 			"Guarda los cambios en boot.conf, dosbox.conf y cmdline.txt (solo las líneas "
 			"que cambian; los comentarios se conservan) y vuelve al juego. Igual que F10."),
 		Action ("Guardar y reiniciar", ActSaveRestart,
-			"Guarda y reinicia la placa, para que se apliquen los ajustes marcados B."),
+			"Guarda y reinicia: DOS si los cambios son R, la placa si alguno es B."),
 		Action ("Salir sin guardar", ActDiscard,
 			"Descarta los cambios hechos en el menú, deshace los que se aplicaron al "
 			"momento y vuelve al juego."),
@@ -1952,7 +1966,7 @@ void SetupTexts (void)
 	// below 0x20 and Circle's table starts at 0x21).
 	s_Menu.Texts.KeysLine1 = "Arriba/Abajo: elegir   Izq/Der: pestaña   Intro +/-: cambiar   Esc: al juego";
 	s_Menu.Texts.KeysLine2 = "F9 Valores por defecto   F10 Guardar y salir";
-	s_Menu.Texts.ApplyLegend = "Sin marca: al momento\nR: al reiniciar DOSBox\n   (de momento, la placa)\nB: al reiniciar la placa";
+	s_Menu.Texts.ApplyLegend = "Sin marca: al momento\nR: al reiniciar DOS\n   (Ctrl+Alt+Supr)\nB: al reiniciar la placa";
 }
 
 // --- keys --------------------------------------------------------------------
@@ -2015,9 +2029,10 @@ void AskToLeave (void)
 			   { "Guardar", "Descartar", "Seguir aquí" });
 }
 
-void SaveAndLeave (bool bRestartBoard)
+void SaveAndLeave (bool bRestart)
 {
 	const bool bBoard = ModifiedNeedsBoard ();
+	const bool bDos = ModifiedNeedsDos ();
 	if (AnyModified () && !SaveSettings ())
 	{
 		s_Menu.OpenDialog (DlgSaveFailed, "No se pudo guardar",
@@ -2027,17 +2042,36 @@ void SaveAndLeave (bool bRestartBoard)
 		return;
 	}
 
-	if (bRestartBoard)
+	// "Guardar y reiniciar": the board if a B setting changed, otherwise DOS.
+	if (bRestart)
 	{
-		BareCoreRequestReboot ();
+		if (bBoard)
+		{
+			BareCoreRequestReboot ();
+			return;
+		}
+		Close ();
+		BareCoreRequestDosRestart ();
 		return;
 	}
 
 	if (bBoard)
 	{
 		s_Menu.OpenDialog (DlgRestartNow, "Reinicio necesario",
-				   "Guardado. Los ajustes marcados R y B se aplican al reiniciar la placa.",
-				   { "Reiniciar ahora", "Más tarde" });
+				   bDos ? "Guardado. Hay ajustes marcados B: se aplican, con los R, al "
+					  "reiniciar la placa."
+					: "Guardado. Los ajustes marcados B se aplican al reiniciar la placa.",
+				   { "Reiniciar la placa", "Más tarde" });
+		return;
+	}
+
+	if (bDos)
+	{
+		s_Menu.OpenDialog (DlgRestartDos, "Reiniciar DOS",
+				   "Guardado. Los ajustes marcados R se aplican al reiniciar DOS (unos "
+				   "segundos; la placa sigue encendida). Lo que haya en marcha en DOS se "
+				   "pierde.",
+				   { "Reiniciar DOS ahora", "Más tarde" });
 		return;
 	}
 
@@ -2330,6 +2364,11 @@ void HandleEvent (const TEvent &Ev)
 		case ActReboot:
 			BareCoreRequestReboot ();
 			break;
+		case ActRestartDos:
+			Discard ();
+			Close ();
+			BareCoreRequestDosRestart ();
+			break;
 		default:
 			break;
 		}
@@ -2349,6 +2388,11 @@ void HandleEvent (const TEvent &Ev)
 		{
 			if (!Ev.bCancelled && Ev.nChoice == 0) BareCoreRequestReboot ();
 			else Close ();
+		}
+		else if (Ev.nId == DlgRestartDos)
+		{
+			Close ();
+			if (!Ev.bCancelled && Ev.nChoice == 0) BareCoreRequestDosRestart ();
 		}
 		break;
 
@@ -2630,4 +2674,23 @@ boolean BareMenuBootWindow (unsigned nSeconds)
 
 	s_bBootWindow.store (false, std::memory_order_release);
 	return s_bOpenedAtBoot ? TRUE : FALSE;
+}
+
+void BareMenuShowMessage (const char *pText)
+{
+	if (s_pPixels == nullptr)
+	{
+		s_pPixels = new u32[PixelWidth * PixelHeight];
+		if (s_pPixels == nullptr)
+		{
+			return;
+		}
+	}
+	CScreen Message;
+	Message.Fill (0, 0, Cols, Rows, White, Blue);
+	const std::string Text = pText != nullptr ? pText : "";
+	const unsigned n = CScreen::Length (Text);
+	Message.Put (n < Cols ? (Cols - n) / 2 : 0, Rows / 2, Text, White, Blue);
+	RenderScreen (Message, Font8x16, s_pPixels, PixelWidth);
+	BareVideoPresent (s_pPixels, PixelWidth, PixelHeight, PixelWidth * sizeof (u32));
 }
