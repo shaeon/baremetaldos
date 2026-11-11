@@ -109,6 +109,34 @@ inline std::string JsString (const std::string &In)
 	return Out;
 }
 
+/// A file or folder name typed in the page (rename, new folder): one name,
+/// not a path - no / \\ : * ? " < > |, no control characters, not "." or "..",
+/// at most 255 bytes, and not ending in a space or a dot (FAT drops those).
+inline bool ValidName (const std::string &Name)
+{
+	if (Name.empty () || Name.size () > 255 || Name == "." || Name == "..") return false;
+	if (Name.back () == ' ' || Name.back () == '.') return false;
+	for (unsigned char c : Name)
+	{
+		if (c < 0x20 || c == 0x7F) return false;
+		if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"'
+		    || c == '<' || c == '>' || c == '|') return false;
+	}
+	return true;
+}
+
+/// A web password as boot.conf can keep it (web_password): 1 to 32 printable
+/// ASCII characters, no spaces, no '#' (a comment in boot.conf).
+inline bool ValidPassword (const std::string &Password)
+{
+	if (Password.empty () || Password.size () > 32) return false;
+	for (unsigned char c : Password)
+	{
+		if (c <= ' ' || c >= 0x7F || c == '#') return false;
+	}
+	return true;
+}
+
 struct TRequestLine
 {
 	std::string Method;	// "GET", "PUT", "POST"

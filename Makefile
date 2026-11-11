@@ -602,6 +602,7 @@ APP_SRCS := \
 	src/platform/bare_menu.cpp \
 	src/platform/bare_net.cpp \
 	src/platform/bare_web.cpp \
+	src/platform/bare_cardfree.cpp \
 	src/platform/bare_sdlnet.cpp \
 	src/platform/bare_midi.cpp \
 	src/dosbox-stub/midi_stub.cpp \

@@ -49,6 +49,16 @@ int main (void)
 	       && JsString ("/dos/GAMES") == "/dos/GAMES",
 	       "names with quotes, & and < survive as a JS string, in <script> and in onclick");
 
+	Check (ValidName ("DOOM") && ValidName ("Monkey Island 2") && ValidName ("juego.zip")
+	       && !ValidName ("") && !ValidName (".") && !ValidName ("..") && !ValidName ("a/b")
+	       && !ValidName ("a\\b") && !ValidName ("c:x") && !ValidName ("x?") && !ValidName ("fin.")
+	       && !ValidName ("fin ") && !ValidName (std::string (256, 'a')),
+	       "a name for rename / new folder: one name, nothing FAT refuses");
+	Check (ValidPassword ("s3cr3t!") && ValidPassword (std::string (32, 'x'))
+	       && !ValidPassword ("") && !ValidPassword ("con espacio") && !ValidPassword ("a#b")
+	       && !ValidPassword ("contrase\xC3\xB1a") && !ValidPassword (std::string (33, 'x')),
+	       "a web password boot.conf can keep: 1-32 printable ASCII, no spaces or #");
+
 	std::printf ("\n%u failures\n", s_nFailures);
 	return s_nFailures == 0 ? 0 : 1;
 }

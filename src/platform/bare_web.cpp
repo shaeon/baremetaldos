@@ -17,6 +17,10 @@
 //                             leaves the old file); missing folders are made
 //   POST /mkdir?path=/dos/N   a folder
 //   POST /delete?path=/dos/X  a file, or a folder and everything in it
+//   POST /rename?path=/dos/X  name=Y in the body: X becomes Y, same folder
+//   POST /move?path=/dos/X    to=/dest in the body: X goes into folder /dest
+//   POST /password            new=P in the body: the password from now on
+//                             (empty: none), kept in boot.conf web_password
 //
 // The page sends each file of an upload as its own PUT, from JavaScript, with
 // the folder structure in the path - no multipart parsing on this side.
@@ -31,6 +35,7 @@
 //
 #include "bare_env.h"
 #include "web_util.h"
+#include "conf_edit.h"
 
 #include <circle/logger.h>
 #include <circle/net/in.h>
@@ -126,6 +131,61 @@ std::vector<TEntry> List (const std::string &Dir)
 	return Out;
 }
 
+// A short form body (application/x-www-form-urlencoded): what came with the
+// header plus the rest, up to nMax bytes.  "" if it is longer or cut.
+bool ReadSmallBody (CSocket *pSocket, const std::string &Already, u64 nLength, std::string *pBody)
+{
+	constexpr u64 MaxForm = 1024;
+	if (nLength > MaxForm)
+	{
+		return false;
+	}
+	*pBody = Already.substr (0, static_cast<size_t> (nLength));
+	char Buffer[256];
+	while (pBody->size () < nLength)
+	{
+		const int n = pSocket->Receive (Buffer, sizeof Buffer, 0);
+		if (n <= 0) return false;
+		pBody->append (Buffer, static_cast<size_t> (n));
+	}
+	pBody->resize (static_cast<size_t> (nLength));
+	return true;
+}
+
+// boot.conf's web_password, changed in place (conf_edit.h keeps the rest of
+// the file as it is), through a temporary file and a rename.
+bool SavePassword (const std::string &Password)
+{
+	std::string Text;
+	if (FILE *pFile = fopen ("SD:/boot.conf", "rb"))
+	{
+		char Buffer[512];
+		size_t n;
+		while ((n = fread (Buffer, 1, sizeof Buffer, pFile)) != 0) Text.append (Buffer, n);
+		fclose (pFile);
+	}
+	bareconf::CConfText Conf (Text, true);
+	Conf.Set ("", "web_password", Password);
+	const std::string New = Conf.Text ();
+
+	FILE *pFile = fopen ("SD:/boot.conf.new", "wb");
+	if (pFile == nullptr) return false;
+	const bool bOk = fwrite (New.data (), 1, New.size (), pFile) == New.size ();
+	if (fclose (pFile) != 0 || !bOk)
+	{
+		remove ("SD:/boot.conf.new");
+		return false;
+	}
+	remove ("SD:/boot.conf");
+	return rename ("SD:/boot.conf.new", "SD:/boot.conf") == 0;
+}
+
+std::string FreeSpace (void)
+{
+	const u64 nFree = BareCardFreeBytes ();
+	return nFree == 0 ? std::string ("?") : bareweb::HumanSize (nFree);
+}
+
 // --- the page ---------------------------------------------------------------------
 
 std::string Page (const std::string &Dir)
@@ -144,7 +204,10 @@ std::string Page (const std::string &Dir)
 	     "td a{color:#0000aa}button{font:inherit;cursor:pointer}"
 	     "#drop{border:2px dashed #55ffff;padding:1em;margin:1em 0;text-align:center}"
 	     "#drop.on{background:#0000ff}#log{white-space:pre-wrap;font-family:monospace}"
-	     "</style></head><body><header>BM-DOS &mdash; tarjeta SD</header><main>";
+	     "form.pw input{font:inherit;margin:.2em .4em .2em 0}"
+	     "</style></head><body><header>BM-DOS &mdash; tarjeta SD"
+	     "<span style='float:right;font-weight:normal'>libre: " + FreeSpace () + "</span>"
+	     "</header><main>";
 
 	// Breadcrumbs.
 	H += "<p><a href='/?dir=/'>SD:</a>";
@@ -175,7 +238,10 @@ std::string Page (const std::string &Dir)
 		else
 			H += "<a href='/get?path=" + UrlEncode (Path) + "'>" + HtmlEscape (E.Name) + "</a>";
 		H += "</td><td class=n>" + std::string (E.bFolder ? "carpeta" : HumanSize (E.nSize)) + "</td>"
-		     "<td><button onclick=\"del('" + JsString (UrlEncode (Path)) + "','"
+		     "<td style='white-space:nowrap'>"
+		     "<button onclick=\"ren('" + JsString (UrlEncode (Path)) + "','" + JsString (E.Name) + "')\">Renombrar</button> "
+		     "<button onclick=\"mov('" + JsString (UrlEncode (Path)) + "','" + JsString (E.Name) + "')\">Mover</button> "
+		     "<button onclick=\"del('" + JsString (UrlEncode (Path)) + "','"
 		     + JsString (E.Name) + "'," + (E.bFolder ? "1" : "0") + ")\">Borrar</button></td></tr>";
 	}
 	H += "</table>";
@@ -185,6 +251,16 @@ std::string Page (const std::string &Dir)
 	     "</div><p><button onclick=mkdir()>Nueva carpeta</button></p><div id=log></div>"
 	     "<p><small>Si DOS está en marcha, escribe <b>RESCAN</b> para que vea lo que subas. "
 	     "No cortes la corriente mientras se sube algo.</small></p>";
+	H += std::string ("<h3>Contraseña</h3><p>") + (s_Password.empty ()
+		? "Ahora <b>sin contraseña</b>: cualquiera en tu red puede entrar aquí."
+		: "Ahora <b>con contraseña</b> (el navegador la pide; vale cualquier usuario).")
+	     + "</p><form class=pw onsubmit='return setpw(event)'>"
+	       "<input type=password id=pw1 placeholder='Nueva contraseña' maxlength=32>"
+	       "<input type=password id=pw2 placeholder='Repítela' maxlength=32>"
+	       "<button>Guardar contraseña</button> "
+	       "<button type=button onclick=nopw()>Quitar contraseña</button></form>"
+	       "<p><small>De 1 a 32 caracteres: letras sin acento, números y símbolos, sin espacios "
+	       "ni #. Se guarda en boot.conf y vale desde ya: el navegador la pedirá.</small></p>";
 
 	H += "<script>const DIR=" + std::string ("'") + JsString (Dir) + "';"
 	     "const log=t=>document.getElementById('log').textContent+=t+'\\n';"
@@ -209,6 +285,19 @@ std::string Page (const std::string &Dir)
 	     "async function mkdir(){const n=prompt('Nombre de la carpeta:');if(!n)return;"
 	     "const r=await fetch('/mkdir?path='+enc((DIR=='/'?'':DIR)+'/'+n),{method:'POST'});"
 	     "if(!r.ok)alert(await r.text());location.reload()}"
+	     "async function post(url,data){const r=await fetch(url,{method:'POST',"
+	     "headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(data)});"
+	     "if(!r.ok){alert(await r.text());return false}return true}"
+	     "async function ren(p,n){const m=prompt('Nuevo nombre para '+n+':',n);if(!m||m==n)return;"
+	     "if(await post('/rename?path='+p,{name:m}))location.reload()}"
+	     "async function mov(p,n){const d=prompt('Mover '+n+' a la carpeta (por ejemplo /dos/JUEGOS):',DIR);"
+	     "if(!d||d==DIR)return;if(await post('/move?path='+p,{to:d}))location.reload()}"
+	     "async function setpw(e){e.preventDefault();const a=document.getElementById('pw1').value,"
+	     "b=document.getElementById('pw2').value;if(a!=b){alert('Las dos no coinciden.');return false}"
+	     "if(!/^[!-~]{1,32}$/.test(a)||a.includes('#')){alert('De 1 a 32 caracteres, sin espacios, acentos ni #.');return false}"
+	     "if(await post('/password',{new:a})){alert('Guardada. El navegador te la pedirá ahora.');location.reload()}return false}"
+	     "async function nopw(){if(!confirm('¿Quitar la contraseña? Cualquiera en tu red podrá entrar.'))return;"
+	     "if(await post('/password',{new:''}))location.reload()}"
 	     "</script></main></body></html>";
 	return H;
 }
@@ -381,8 +470,94 @@ void Handle (CSocket *pSocket)
 		Respond (pSocket, bOk ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
 			 bOk ? "ok" : "No se pudo escribir " + Path);
 	}
+	else if (R.Method == "POST" && (R.Path == "/rename" || R.Path == "/move" || R.Path == "/password"))
+	{
+		std::string Form;
+		if (!ReadSmallBody (pSocket, Body, nLength, &Form))
+		{
+			Respond (pSocket, "400 Bad Request", "text/plain; charset=utf-8", "Formulario no válido");
+			return;
+		}
+
+		if (R.Path == "/password")
+		{
+			const std::string New = bareweb::QueryParam (Form, "new");
+			if (!New.empty () && !bareweb::ValidPassword (New))
+			{
+				Respond (pSocket, "400 Bad Request", "text/plain; charset=utf-8",
+					 "De 1 a 32 caracteres, sin espacios, acentos ni #.");
+				return;
+			}
+			const bool bOk = SavePassword (New);
+			if (bOk) s_Password = New;		// from the next request on
+			CLogger::Get ()->Write (FromWeb, LogNotice, "password %s: %s",
+						New.empty () ? "removed" : "changed", bOk ? "ok" : "failed");
+			Respond (pSocket, bOk ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
+				 bOk ? "ok" : "No se pudo escribir boot.conf");
+			return;
+		}
+
+		if (Path == "/")
+		{
+			Respond (pSocket, "400 Bad Request", "text/plain; charset=utf-8", "La raíz no se mueve");
+			return;
+		}
+
+		std::string To;
+		if (R.Path == "/rename")
+		{
+			const std::string Name = bareweb::QueryParam (Form, "name");
+			if (!bareweb::ValidName (Name))
+			{
+				Respond (pSocket, "400 Bad Request", "text/plain; charset=utf-8",
+					 "Nombre no válido: sin / \\ : * ? \" < > |, y que no acabe en punto o espacio.");
+				return;
+			}
+			const std::string Parent = bareweb::Parent (Path);
+			To = Parent == "/" ? "/" + Name : Parent + "/" + Name;
+		}
+		else
+		{
+			const std::string Dest = bareweb::SafePath (bareweb::QueryParam (Form, "to"));
+			struct stat Info;
+			if (Dest.empty () || stat (Card (Dest).c_str (), &Info) != 0 || !S_ISDIR (Info.st_mode))
+			{
+				Respond (pSocket, "400 Bad Request", "text/plain; charset=utf-8",
+					 "Esa carpeta no existe en la tarjeta.");
+				return;
+			}
+			// Not into itself or a folder inside it.
+			if (Dest == Path || Dest.rfind (Path + "/", 0) == 0)
+			{
+				Respond (pSocket, "400 Bad Request", "text/plain; charset=utf-8",
+					 "Una carpeta no puede ir dentro de sí misma.");
+				return;
+			}
+			const std::string Name = Path.substr (Path.find_last_of ('/') + 1);
+			To = Dest == "/" ? "/" + Name : Dest + "/" + Name;
+		}
+
+		struct stat Exists;
+		if (stat (Card (To).c_str (), &Exists) == 0)
+		{
+			Respond (pSocket, "409 Conflict", "text/plain; charset=utf-8", "Ya existe " + To);
+			return;
+		}
+		// FatFs's f_rename moves too, within the card.
+		const bool bOk = rename (Card (Path).c_str (), Card (To).c_str ()) == 0;
+		CLogger::Get ()->Write (FromWeb, LogNotice, "%s %s -> %s: %s", R.Path.c_str () + 1,
+					Path.c_str (), To.c_str (), bOk ? "ok" : "failed");
+		Respond (pSocket, bOk ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
+			 bOk ? "ok" : "No se pudo: " + Path + " -> " + To);
+	}
 	else if (R.Method == "POST" && R.Path == "/mkdir" && Path != "/")
 	{
+		if (!bareweb::ValidName (Path.substr (Path.find_last_of ('/') + 1)))
+		{
+			Respond (pSocket, "400 Bad Request", "text/plain; charset=utf-8",
+				 "Nombre no válido: sin / \\ : * ? \" < > |, y que no acabe en punto o espacio.");
+			return;
+		}
 		const bool bOk = MakeFolders (Path);
 		Respond (pSocket, bOk ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
 			 bOk ? "ok" : "No se pudo crear " + Path);

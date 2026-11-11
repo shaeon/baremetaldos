@@ -479,6 +479,10 @@ boolean BareWebStart (const char *pPassword, unsigned nPort);
 /// \brief Listening.
 boolean BareWebRunning (void);
 
+/// \brief Free space on the SD card, in bytes; 0 if FatFs cannot tell
+///\t   (bare_cardfree.cpp).
+u64     BareCardFreeBytes (void);
+
 // ---------------------------------------------------------------------------
 // Secondary cores - bare_cores.cpp
 // ---------------------------------------------------------------------------
