@@ -65,6 +65,12 @@ const char *s_pDeviceName = "none";
 u64 s_nQueuedFrames = 0;
 u64 s_nDroppedFrames = 0;
 u64 s_nLastDrainMicros = 0;
+// Set before BareAudioInit (boot.conf audio_out): try the 3.5 mm jack first.
+bool s_bPreferJack = false;
+
+// Whole-output volume, 0..256 for 0..100 % (boot.conf volume, the menu).
+unsigned s_nVolume256 = 256;
+
 u64 s_nGaps = 0;			// writes that found the device queue empty
 unsigned s_nSampleRate = 44100;	// set by BareAudioInit
 
@@ -143,24 +149,31 @@ boolean BareAudioInit (unsigned nSampleRate, CInterruptSystem *pInterrupt)
 	// What this cannot detect: an HDMI display that announces audio and has no
 	// speakers (quite common on monitors - they pass the audio through to
 	// nothing).  If that is your setup, sound is being sent and not heard.
-	// To force the jack instead, move the PWM line above the HDMI line and
-	// rebuild; there is no runtime setting for it because there is nothing to
-	// query.
+	// Nothing can be queried to choose automatically (a display can announce
+	// audio it cannot play, and a jack can be empty), so it is a setting:
+	// boot.conf audio_out = jack, or the setup menu's Sonido page.
 #if BARE_AUDIO_DEVICE == 1
-	// Forced from the Makefile: make AUDIO_DEVICE=pwm.  There is no runtime
-	// switch because there is nothing to query: a display can announce audio
-	// it cannot play, and a jack can be empty.
-	TryDevice (new CPWMSoundBaseDevice (pInterrupt, nSampleRate, ChunkSize),
-		   "PWM (jack, forced)");
-	TryDevice (new CHDMISoundBaseDevice (pInterrupt, nSampleRate, ChunkSize), "HDMI");
-	TryDevice (new CI2SSoundBaseDevice (pInterrupt, nSampleRate, ChunkSize, FALSE), "I2S");
-#else
-	TryDevice (new CHDMISoundBaseDevice (pInterrupt, nSampleRate, ChunkSize),
-		   "HDMI");
-	TryDevice (new CPWMSoundBaseDevice (pInterrupt, nSampleRate, ChunkSize),
-		   "PWM (jack)");
-	TryDevice (new CI2SSoundBaseDevice (pInterrupt, nSampleRate, ChunkSize, FALSE), "I2S");
+	// make AUDIO_DEVICE=pwm still forces the jack first, as it always did.
+	s_bPreferJack = true;		// the build-time switch still forces it
 #endif
+
+	// boot.conf audio_out = jack: the jack first, HDMI as the fallback;
+	// otherwise HDMI first.  I2S last either way.
+	if (s_bPreferJack)
+	{
+		TryDevice (new CPWMSoundBaseDevice (pInterrupt, nSampleRate, ChunkSize),
+			   "PWM (jack)");
+		TryDevice (new CHDMISoundBaseDevice (pInterrupt, nSampleRate, ChunkSize),
+			   "HDMI");
+	}
+	else
+	{
+		TryDevice (new CHDMISoundBaseDevice (pInterrupt, nSampleRate, ChunkSize),
+			   "HDMI");
+		TryDevice (new CPWMSoundBaseDevice (pInterrupt, nSampleRate, ChunkSize),
+			   "PWM (jack)");
+	}
+	TryDevice (new CI2SSoundBaseDevice (pInterrupt, nSampleRate, ChunkSize, FALSE), "I2S");
 
 	if (s_pSound == nullptr)
 	{
@@ -249,6 +262,10 @@ void BareAudioQueue (const s16 *pFrames, unsigned nFrames)
 				x += s_Midi[i];
 			}
 			x = bareaudio::SoftLimit (s_DCBlock.Step (i & 1, x));
+			if (s_nVolume256 != 256)
+			{
+				x = x * static_cast<float> (s_nVolume256) * (1.0f / 256.0f);
+			}
 			s_Mixed[i] = static_cast<s16> (x);
 		}
 
@@ -375,4 +392,19 @@ void BareAudioStats (u64 *pQueuedFrames, u64 *pDroppedFrames, u64 *pMicrosSinceW
 u64 BareAudioGaps (void)
 {
 	return s_nGaps;
+}
+
+void BareAudioPreferJack (boolean bJack)
+{
+	s_bPreferJack = bJack != FALSE;
+}
+
+void BareAudioSetVolume (unsigned nPercent)
+{
+	s_nVolume256 = (nPercent > 100 ? 100 : nPercent) * 256 / 100;
+}
+
+unsigned BareAudioSampleRate (void)
+{
+	return s_pSound != nullptr ? s_nSampleRate : 0;
 }

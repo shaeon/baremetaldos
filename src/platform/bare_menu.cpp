@@ -35,6 +35,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <dirent.h>
 #include <string>
 
 #include "libretro.h"
@@ -87,7 +88,22 @@ enum TActionId
 	ActSaveRestart,
 	ActDiscard,
 	ActDefaults,
+	ActTestSound,
+	ActTestMidi,
 };
+
+// --- sound tests (core 0's frame loop) -------------------------------------
+//
+// While the menu is open DOSBox makes no sound, so the test feeds the output
+// itself: a sine, or silence for the MIDI mixer to add the chord to.  Frames
+// are generated as real time passes, a few tens of milliseconds ahead, and go
+// through BareAudioQueue - DC blocker, MIDI, volume and all - like DOSBox's.
+enum class TTest { None, Tone, Midi };
+TTest s_Test = TTest::None;
+u64 s_nTestStart = 0;
+u64 s_nTestFrames = 0;			// frames queued since the start
+bool s_bTestChordOff = false;
+float s_fTestPhase = 0.0f;
 
 enum TDialogId
 {
@@ -147,6 +163,23 @@ enum TSettingId
 	SetCPUType,
 	SetCycles,
 	SetCycleStep,
+
+	SetAudioOut = 300,
+	SetVolume,
+	SetSBType,
+	SetSBBase,
+	SetSBIrq,
+	SetSBDma,
+	SetSBHdma,
+	SetOPL,
+	SetGUS,
+	SetSpeaker,
+	SetTandy,
+	SetMidiDevice,
+	SetMpu,
+	SetSoundFont,		// [midi] midiconfig when mididevice = fluidsynth
+	SetMT32Model,		// [midi] midiconfig when mididevice = mt32
+	SetMidiVolume,
 };
 
 void LiveScaler (const std::string &Value)
@@ -178,6 +211,41 @@ void LiveCycles (const std::string &Value)
 	}
 }
 
+void LiveVolume (const std::string &Value)
+{
+	BareAudioSetVolume (static_cast<unsigned> (atoi (Value.c_str ())));
+}
+
+void LiveMidiVolume (const std::string &Value)
+{
+	BareMidiSetVolume (static_cast<unsigned> (atoi (Value.c_str ())));
+}
+
+// The SoundFonts on the card, for the SoundFont setting: every .sf2 in
+// /dosbox/system, as the path dosbox.conf's midiconfig takes.
+std::vector<TChoice> ScanSoundFonts (void)
+{
+	std::vector<TChoice> Fonts;
+	DIR *pDir = opendir ("SD:/dosbox/system");
+	if (pDir != nullptr)
+	{
+		while (const dirent *pEntry = readdir (pDir))
+		{
+			const std::string Name = pEntry->d_name;
+			if (Name.size () > 4 && bareconf::Lower (Name.substr (Name.size () - 4)) == ".sf2")
+			{
+				Fonts.push_back (TChoice { Name, "/dosbox/system/" + Name });
+			}
+		}
+		closedir (pDir);
+	}
+	if (Fonts.empty ())
+	{
+		Fonts.push_back (TChoice { "(no hay .sf2)", "/dosbox/system/default.sf2" });
+	}
+	return Fonts;
+}
+
 // "24000", "fixed  24000", "Fixed 24000" -> "fixed 24000"; anything else as is.
 std::string NormaliseCycles (const std::string &In)
 {
@@ -194,6 +262,8 @@ std::string NormaliseCycles (const std::string &In)
 }
 
 std::vector<TSetting> s_Settings;
+
+TSetting *FindSetting (int nId);
 
 void DefineSettings (void)
 {
@@ -291,6 +361,114 @@ void DefineSettings (void)
 		TApply::RestartDOSBox,
 		{ { "500", "500" }, { "1000", "1000" }, { "2000", "2000" }, { "5000", "5000" } },
 		2, nullptr });
+
+	// --- Sonido: boot.conf (salida, volúmenes) y dosbox.conf (tarjetas) ------
+
+	s_Settings.push_back ({ SetAudioOut, FileBoot, "", "audio_out", "Salida",
+		"Por dónde sale el sonido. HDMI: por el cable de la pantalla. Jack: la salida "
+		"de 3,5 mm de la placa (PWM). Si la elegida no arranca, se prueba la otra.",
+		TApply::RestartBoard, { { "HDMI", "hdmi" }, { "Jack 3,5 mm", "jack" } }, 0, nullptr });
+
+	s_Settings.push_back ({ SetVolume, FileBoot, "", "volume", "Volumen general",
+		"El volumen de todo lo que sale, después del mezclador de DOSBox. Se oye al "
+		"momento: prueba con \"Probar sonido\".",
+		TApply::Now,
+		{ { "100 %", "100" }, { "90 %", "90" }, { "80 %", "80" }, { "70 %", "70" }, { "60 %", "60" },
+		  { "50 %", "50" }, { "40 %", "40" }, { "30 %", "30" }, { "20 %", "20" }, { "10 %", "10" },
+		  { "Silencio", "0" } },
+		0, LiveVolume });
+
+	s_Settings.push_back ({ SetSBType, FileDOSBox, "sblaster", "sbtype", "Sound Blaster",
+		"El modelo de Sound Blaster. SB16 es el más compatible; algunos juegos antiguos "
+		"solo conocen la Pro o la 2.0. Game Blaster es la CMS de Creative.",
+		TApply::RestartDOSBox,
+		{ { "Sound Blaster 16", "sb16" }, { "Sound Blaster Pro 2", "sbpro2" },
+		  { "Sound Blaster Pro", "sbpro1" }, { "Sound Blaster 2.0", "sb2" },
+		  { "Sound Blaster 1.x", "sb1" }, { "Game Blaster", "gb" }, { "Ninguna", "none" } },
+		0, nullptr });
+
+	s_Settings.push_back ({ SetSBBase, FileDOSBox, "sblaster", "sbbase", "  Puerto",
+		"La dirección de E/S de la Sound Blaster. 220 es lo que esperan los juegos. "
+		"DOSBox la anuncia en la variable BLASTER.",
+		TApply::RestartDOSBox,
+		{ { "220", "220" }, { "240", "240" }, { "260", "260" }, { "280", "280" } }, 0, nullptr });
+
+	s_Settings.push_back ({ SetSBIrq, FileDOSBox, "sblaster", "irq", "  IRQ",
+		"La interrupción de la Sound Blaster. 7 o 5 son las habituales.",
+		TApply::RestartDOSBox,
+		{ { "7", "7" }, { "5", "5" }, { "3", "3" }, { "9", "9" }, { "10", "10" } }, 0, nullptr });
+
+	s_Settings.push_back ({ SetSBDma, FileDOSBox, "sblaster", "dma", "  DMA",
+		"El canal DMA de 8 bits. 1 es el habitual.",
+		TApply::RestartDOSBox, { { "1", "1" }, { "3", "3" }, { "0", "0" } }, 0, nullptr });
+
+	s_Settings.push_back ({ SetSBHdma, FileDOSBox, "sblaster", "hdma", "  DMA alto",
+		"El canal DMA de 16 bits (solo SB16). 5 es el habitual.",
+		TApply::RestartDOSBox, { { "5", "5" }, { "6", "6" }, { "7", "7" } }, 0, nullptr });
+
+	s_Settings.push_back ({ SetOPL, FileDOSBox, "sblaster", "oplmode", "FM (OPL / AdLib)",
+		"El chip FM de la música AdLib. Auto pone el que lleva la Sound Blaster elegida "
+		"(OPL3 en la SB16 y la Pro 2). Dual OPL2 es el de la Pro original.",
+		TApply::RestartDOSBox,
+		{ { "Auto", "auto" }, { "OPL2", "opl2" }, { "Dual OPL2", "dualopl2" }, { "OPL3", "opl3" },
+		  { "OPL3 Gold", "opl3gold" }, { "CMS", "cms" }, { "Ninguno", "none" } },
+		0, nullptr });
+
+	s_Settings.push_back ({ SetGUS, FileDOSBox, "gus", "gus", "Gravis Ultrasound",
+		"Para su música hace falta la carpeta ULTRASND con los patches en C:\\ULTRASND "
+		"(la de los discos de Gravis). Los juegos que suben sus propios sonidos, como "
+		"Second Reality, no los necesitan.",
+		TApply::RestartDOSBox, { { "No", "false" }, { "Sí", "true" } }, 0, nullptr });
+
+	s_Settings.push_back ({ SetSpeaker, FileDOSBox, "speaker", "pcspeaker", "Altavoz del PC",
+		"El pitido del PC. Algunos juegos lo usan para todo el sonido.",
+		TApply::RestartDOSBox, { { "Sí", "true" }, { "No", "false" } }, 0, nullptr });
+
+	s_Settings.push_back ({ SetTandy, FileDOSBox, "speaker", "tandy", "Sonido Tandy",
+		"El chip de sonido de 3 voces del Tandy 1000. Auto lo activa con la máquina Tandy.",
+		TApply::RestartDOSBox, { { "Auto", "auto" }, { "Sí", "on" }, { "No", "off" } }, 0, nullptr });
+
+	s_Settings.push_back ({ SetMidiDevice, FileDOSBox, "midi", "mididevice", "Dispositivo MIDI",
+		"General MIDI: FluidSynth con un SoundFont de /dosbox/system. MT-32: Munt, con las "
+		"ROM de Roland en /dosbox/system (no se incluyen). Se generan en el núcleo 1. En "
+		"el juego, elige la música General MIDI o Roland en el puerto 330.",
+		TApply::RestartDOSBox,
+		{ { "Ninguno", "none" }, { "General MIDI", "fluidsynth" }, { "Roland MT-32", "mt32" } },
+		0, nullptr });
+
+	s_Settings.push_back ({ SetMpu, FileDOSBox, "midi", "mpu401", "  MPU-401",
+		"La interfaz MIDI que ven los juegos. Inteligente sirve para todos; UART solo para "
+		"los que no piden el modo inteligente. Ninguna desconecta el MIDI aunque haya "
+		"dispositivo.",
+		TApply::RestartDOSBox,
+		{ { "Inteligente", "intelligent" }, { "UART", "uart" }, { "Ninguna", "none" } }, 0, nullptr });
+
+	s_Settings.push_back ({ SetSoundFont, FileDOSBox, "midi", "midiconfig", "  SoundFont",
+		"Para General MIDI: el fichero .sf2 de /dosbox/system que usa FluidSynth. Copia "
+		"más en esa carpeta y aparecerán aquí.",
+		TApply::RestartDOSBox, ScanSoundFonts (), 0, nullptr });
+
+	s_Settings.push_back ({ SetMT32Model, FileDOSBox, "midi", "midiconfig", "  Modelo Roland",
+		"Para MT-32: qué pareja de ROM usar si hay las dos. MT-32: MT32_CONTROL.ROM y "
+		"MT32_PCM.ROM; CM-32L: CM32L_CONTROL.ROM y CM32L_PCM.ROM.",
+		TApply::RestartDOSBox, { { "MT-32", "" }, { "CM-32L", "cm32l" } }, 0, nullptr });
+
+	s_Settings.push_back ({ SetMidiVolume, FileBoot, "", "midi_volume", "Volumen del MIDI",
+		"El volumen de la música MIDI frente al resto del sonido de DOSBox. Se oye al "
+		"momento: prueba con \"Probar MIDI\".",
+		TApply::Now,
+		{ { "25 %", "25" }, { "50 %", "50" }, { "75 %", "75" }, { "100 %", "100" },
+		  { "125 %", "125" }, { "150 %", "150" }, { "200 %", "200" } },
+		3, LiveMidiVolume });
+
+	// The default SoundFont: default.sf2 if the card has it.
+	if (TSetting *pFont = FindSetting (SetSoundFont))
+	{
+		for (unsigned i = 0; i < pFont->Choices.size (); i++)
+		{
+			if (bareconf::Lower (pFont->Choices[i].Label) == "default.sf2") pFont->nDefault = i;
+		}
+	}
 }
 
 TSetting *FindSetting (int nId)
@@ -386,6 +564,36 @@ void LoadSettings (void)
 		else if (S.File == FileBoot)
 		{
 			bFound = BootConf.Get (S.pSection, S.pKey, &Value);
+		}
+		else if (S.nId == SetSoundFont || S.nId == SetMT32Model)
+		{
+			// One key, two settings: a path ending in .sf2 is the SoundFont,
+			// "cm32l" is the model; whichever it is not keeps its default.
+			std::string Config;
+			DOSBoxConf.Get ("midi", "midiconfig", &Config);
+			Config = bareconf::Trim (Config);
+			const std::string Lower = bareconf::Lower (Config);
+			if (S.nId == SetSoundFont && Lower.size () > 4 && Lower.substr (Lower.size () - 4) == ".sf2")
+			{
+				for (unsigned i = 0; i < S.Choices.size (); i++)
+				{
+					const std::string &Path = S.Choices[i].Value;
+					const std::string Base = Lower.substr (Lower.find_last_of ("/\\") + 1);
+					if (bareconf::Lower (Path.substr (Path.find_last_of ('/') + 1)) == Base)
+					{
+						S.nSaved = S.nPending = i;
+					}
+				}
+			}
+			else if (S.nId == SetSoundFont)
+			{
+				S.nSaved = S.nPending = S.nDefault;
+			}
+			else
+			{
+				S.nSaved = S.nPending = Lower == "cm32l" ? 1 : 0;
+			}
+			continue;
 		}
 		else if (S.File == FileDOSBox)
 		{
@@ -518,6 +726,10 @@ bool SaveSettings (void)
 		bareconf::CConfText Conf (Text, false);
 		for (const TSetting &S : s_Settings)
 		{
+			if (S.nId == SetSoundFont || S.nId == SetMT32Model)
+			{
+				continue;		// written below, for the device chosen
+			}
 			if (S.nPending != S.nSaved && S.File == FileDOSBox)
 			{
 				Conf.Set (S.pSection, S.pKey, S.Choices[S.nPending].Value);
@@ -527,6 +739,25 @@ bool SaveSettings (void)
 				}
 			}
 		}
+		// midiconfig: the SoundFont for General MIDI, the model for MT-32;
+		// left alone with no device (it may hold something set by hand).
+		{
+			const TSetting *pDev = FindSetting (SetMidiDevice);
+			const TSetting *pFont = FindSetting (SetSoundFont);
+			const TSetting *pModel = FindSetting (SetMT32Model);
+			const std::string &Dev = pDev->Choices[pDev->nPending].Value;
+			const bool bTouched = pDev->nPending != pDev->nSaved || pFont->nPending != pFont->nSaved
+					      || pModel->nPending != pModel->nSaved;
+			if (bTouched && Dev == "fluidsynth")
+			{
+				Conf.Set ("midi", "midiconfig", pFont->Choices[pFont->nPending].Value);
+			}
+			else if (bTouched && Dev == "mt32")
+			{
+				Conf.Set ("midi", "midiconfig", pModel->Choices[pModel->nPending].Value);
+			}
+		}
+
 		bOk = WriteText (DOSBoxPath, Conf.Text ()) && bOk;
 	}
 
@@ -754,20 +985,43 @@ void BuildPages (void)
 		{ "Explorar la tarjeta", TApply::Now },
 	}));
 
-	Pages.push_back (PagePlanned ("Sonido", "Tarjetas de sonido, MIDI y volumen.",
 	{
-		{ "Salida (HDMI/jack)", TApply::RestartBoard },
-		{ "Volumen general", TApply::Now },
-		{ "Sound Blaster", TApply::RestartDOSBox },
-		{ "OPL / AdLib", TApply::RestartDOSBox },
-		{ "Gravis Ultrasound", TApply::RestartDOSBox },
-		{ "Altavoz del PC", TApply::RestartDOSBox },
-		{ "Dispositivo MIDI", TApply::RestartDOSBox },
-		{ "SoundFont", TApply::RestartDOSBox },
-		{ "Modelo de MT-32", TApply::RestartDOSBox },
-		{ "Volumen del MIDI", TApply::Now },
-		{ "Probar sonido", TApply::Now },
-	}));
+		TPage P;
+		P.Title = "Sonido";
+		P.Help = "Tarjetas de sonido, MIDI y volumen.";
+		P.Items =
+		{
+			Section ("Salida"),
+			SettingItem (*FindSetting (SetAudioOut)),
+			SettingItem (*FindSetting (SetVolume)),
+			Action ("Probar sonido", ActTestSound,
+				"Un pitido por la izquierda y otro por la derecha, con el volumen "
+				"general aplicado. Si no lo oyes, mira la salida y el volumen."),
+			Section ("Tarjetas"),
+			SettingItem (*FindSetting (SetSBType)),
+			SettingItem (*FindSetting (SetSBBase)),
+			SettingItem (*FindSetting (SetSBIrq)),
+			SettingItem (*FindSetting (SetSBDma)),
+			SettingItem (*FindSetting (SetSBHdma)),
+			SettingItem (*FindSetting (SetOPL)),
+			SettingItem (*FindSetting (SetGUS)),
+			SettingItem (*FindSetting (SetSpeaker)),
+			SettingItem (*FindSetting (SetTandy)),
+			Section ("MIDI"),
+			SettingItem (*FindSetting (SetMidiDevice)),
+			SettingItem (*FindSetting (SetMpu)),
+			SettingItem (*FindSetting (SetSoundFont)),
+			SettingItem (*FindSetting (SetMT32Model)),
+			SettingItem (*FindSetting (SetMidiVolume)),
+			Action ("Probar MIDI", ActTestMidi,
+				BareMidiActive ()
+				? "Un acorde de piano por el sintetizador que está funcionando ahora, "
+				  "con el volumen del MIDI aplicado."
+				: "Ahora no hay sintetizador MIDI funcionando: elige un dispositivo, "
+				  "guarda y reinicia."),
+		};
+		Pages.push_back (P);
+	}
 
 	{
 		TPage P;
@@ -958,6 +1212,21 @@ void HandleEvent (const TEvent &Ev)
 		case ActSaveRestart:	SaveAndLeave (true); break;
 		case ActDiscard:	Discard (); Close (); break;
 		case ActDefaults:	HandleEvent (TEvent { TEventKind::Defaults }); break;
+		case ActTestSound:
+			s_Test = TTest::Tone;
+			s_nTestStart = BareMicros ();
+			s_nTestFrames = 0;
+			break;
+		case ActTestMidi:
+			if (BareMidiActive ())
+			{
+				BareMidiSendTestChord (TRUE);
+				s_Test = TTest::Midi;
+				s_bTestChordOff = false;
+				s_nTestStart = BareMicros ();
+				s_nTestFrames = 0;
+			}
+			break;
 		case ActShutdown:
 			// Changes not saved are dropped, as a power-off without saving
 			// would; the shutdown itself is what was asked for.
@@ -1006,6 +1275,62 @@ void Press (TKey Key)
 	BuildPages ();		// values and '*' marks follow the change
 	UpdateTitle ();
 	s_bDirty = true;
+}
+
+void PumpTest (u64 nNow)
+{
+	if (s_Test == TTest::None)
+	{
+		return;
+	}
+
+	const unsigned nRate = BareAudioSampleRate ();
+	if (nRate == 0)
+	{
+		s_Test = TTest::None;
+		return;
+	}
+
+	// Tone: 0.5 s at 440 Hz on the left, 0.5 s at 660 Hz on the right.
+	// MIDI: the chord for 1.5 s, then 1 s more of silence for its release.
+	const u64 nElapsed = nNow - s_nTestStart;
+	const u64 nLength = s_Test == TTest::Tone ? 1000000 : 2500000;
+	if (s_Test == TTest::Midi && !s_bTestChordOff && nElapsed >= 1500000)
+	{
+		BareMidiSendTestChord (FALSE);
+		s_bTestChordOff = true;
+	}
+	if (nElapsed >= nLength)
+	{
+		s_Test = TTest::None;
+		return;
+	}
+
+	// Keep about 60 ms queued ahead of real time.
+	const u64 nDue = (nElapsed + 60000) * nRate / 1000000;
+	static s16 Buffer[1024 * 2];
+	while (s_nTestFrames < nDue)
+	{
+		const unsigned nFrames = static_cast<unsigned> (
+			nDue - s_nTestFrames < 1024 ? nDue - s_nTestFrames : 1024);
+		for (unsigned i = 0; i < nFrames; i++)
+		{
+			s16 nLeft = 0, nRight = 0;
+			if (s_Test == TTest::Tone)
+			{
+				const bool bRight = (s_nTestFrames + i) * 2 >= nRate;	// second half
+				const float fHz = bRight ? 660.0f : 440.0f;
+				const s16 n = static_cast<s16> (9000.0f * __builtin_sinf (s_fTestPhase));
+				s_fTestPhase += 2.0f * 3.14159265f * fHz / nRate;
+				if (s_fTestPhase > 6.2831853f) s_fTestPhase -= 6.2831853f;
+				(bRight ? nRight : nLeft) = n;
+			}
+			Buffer[2 * i] = nLeft;
+			Buffer[2 * i + 1] = nRight;
+		}
+		BareAudioQueue (Buffer, nFrames);
+		s_nTestFrames += nFrames;
+	}
 }
 
 void Draw (void)
@@ -1118,6 +1443,8 @@ void BareMenuTick (void)
 			s_bRepeatKey = false;
 		}
 	}
+
+	PumpTest (nNow);
 
 	if (s_bRepeatKey && !s_bClosing && nNow >= s_nRepeatNext)
 	{

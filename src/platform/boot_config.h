@@ -41,6 +41,7 @@
 // See LICENSE in the repository root.
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstdarg>
 #include <cstring>
 #include <cstddef>
@@ -146,6 +147,16 @@ struct TBootConfig
 	//   smooth  linear interpolation, the port's original look
 	bool bSharpScale;
 
+	// Sound output: HDMI (default) or the 3.5 mm jack (PWM).  The other one is
+	// still tried if the chosen one does not start.
+	bool bAudioJack;
+
+	// Volumes in percent: the whole output (0-100), and the MIDI synthesizers
+	// relative to DOSBox's own sound (25-200).  Both applied by the port, after
+	// DOSBox's mixer.
+	unsigned nVolume;
+	unsigned nMidiVolume;
+
 	// What the file said that could not be used.  ReadBootConfig is a plain
 	// function on purpose (it runs before anything else exists and has no
 	// business touching the kernel), so it cannot call CKernel::Report();
@@ -204,6 +215,9 @@ void ReadBootConfig (TBootConfig *pConfig)
 	pConfig->nVideoCore = 2;
 	pConfig->bVsync = true;
 	pConfig->bSharpScale = true;
+	pConfig->bAudioJack = false;
+	pConfig->nVolume = 100;
+	pConfig->nMidiVolume = 100;
 	pConfig->Warning[0] = '\0';
 
 	FILE *pFile = fopen (BOOT_CONFIG, "r");
@@ -330,6 +344,39 @@ void ReadBootConfig (TBootConfig *pConfig)
 			{
 				BootConfigWarn (pConfig, "boot.conf: unknown vsync \"%s\""
 					" (on|off)", pValue);
+			}
+		}
+		else if (strcmp (pKey, "audio_out") == 0)
+		{
+			if (strcmp (pValue, "hdmi") == 0 || strcmp (pValue, "jack") == 0)
+			{
+				pConfig->bAudioJack = strcmp (pValue, "jack") == 0;
+			}
+			else
+			{
+				BootConfigWarn (pConfig, "boot.conf: unknown audio_out \"%s\""
+					" (hdmi|jack)", pValue);
+			}
+		}
+		else if (strcmp (pKey, "volume") == 0 || strcmp (pKey, "midi_volume") == 0)
+		{
+			const bool bMidi = strcmp (pKey, "midi_volume") == 0;
+			char *pEnd = nullptr;
+			const unsigned long n = strtoul (pValue, &pEnd, 10);
+			const unsigned long nMin = bMidi ? 25 : 0;
+			const unsigned long nMax = bMidi ? 200 : 100;
+			if (pEnd == pValue || *pEnd != '\0' || n < nMin || n > nMax)
+			{
+				BootConfigWarn (pConfig, "boot.conf: %s \"%s\" is not %lu-%lu",
+						pKey, pValue, nMin, nMax);
+			}
+			else if (bMidi)
+			{
+				pConfig->nMidiVolume = static_cast<unsigned> (n);
+			}
+			else
+			{
+				pConfig->nVolume = static_cast<unsigned> (n);
 			}
 		}
 		else if (strcmp (pKey, "scaler") == 0)

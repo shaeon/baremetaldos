@@ -164,6 +164,17 @@ static const TVideoCase VideoCases[] =
 };
 
 struct TScaleCase { const char *pName; const char *pContents; bool bWantSharp; const char *pWantWarningPart; };
+struct TAudioCase { const char *pName; const char *pContents; bool bJack; unsigned nVol; unsigned nMidi; const char *pWarn; };
+static const TAudioCase AudioCases[] =
+{
+	{ "audio: por defecto", "display = 1280x720\n", false, 100, 100, nullptr },
+	{ "audio: jack y volumenes", "audio_out = jack\nvolume = 70\nmidi_volume = 150\n", true, 70, 150, nullptr },
+	{ "audio: volumen fuera de rango", "volume = 120\n", false, 100, 100, "volume" },
+	{ "audio: midi_volume bajo el minimo", "midi_volume = 10\n", false, 100, 100, "midi_volume" },
+	{ "audio: salida desconocida", "audio_out = usb\n", false, 100, 100, "audio_out" },
+	{ "audio: volumen no numerico", "volume = alto\n", false, 100, 100, "volume" },
+};
+
 static const TScaleCase ScaleCases[] =
 {
 	{ "scaler: por defecto sharp", "display = 1280x720\n", true, nullptr },
@@ -283,6 +294,24 @@ int main (void)
 		{
 			Check (Config.Warning[0] == '\0', Case.pName, "sin aviso", Config.Warning, "");
 		}
+	}
+
+	for (const TAudioCase &Case : AudioCases)
+	{
+		FILE *pFile = fopen (BOOT_CONFIG, "w");
+		if (pFile == nullptr) { Errors++; continue; }
+		fputs (Case.pContents, pFile);
+		fclose (pFile);
+
+		TBootConfig Config;
+		ReadBootConfig (&Config);
+		Check (Config.bAudioJack == Case.bJack, Case.pName, "audio_out");
+		Check (Config.nVolume == Case.nVol, Case.pName, "volume");
+		Check (Config.nMidiVolume == Case.nMidi, Case.pName, "midi_volume");
+		if (Case.pWarn != nullptr)
+			Check (strstr (Config.Warning, Case.pWarn) != nullptr, Case.pName, "aviso", Config.Warning, Case.pWarn);
+		else
+			Check (Config.Warning[0] == '\0', Case.pName, "sin aviso", Config.Warning, "");
 	}
 
 	for (const TScaleCase &Case : ScaleCases)

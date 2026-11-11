@@ -456,6 +456,9 @@ boolean CKernel::Initialize (void)
 
 	// --- audio ------------------------------------------------------------
 	Report ("audio: initialising (%u Hz)", MixerRate);
+	BareAudioPreferJack (Config.bAudioJack ? TRUE : FALSE);
+	BareAudioSetVolume (Config.nVolume);
+	BareMidiSetVolume (Config.nMidiVolume);
 	if (!BareAudioInit (MixerRate, &mInterrupt))
 	{
 		Report ("FAIL: cannot initialise audio");

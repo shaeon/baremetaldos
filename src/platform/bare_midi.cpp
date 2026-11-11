@@ -127,6 +127,7 @@ std::atomic<u64> s_nBytesDropped {0};		// core 0: MIDI byte ring full
 std::atomic<u64> s_nUnderruns {0};		// core 0: mixer found too few samples
 std::atomic<u64> s_nRendered {0};		// core 1: frames rendered so far
 std::atomic<unsigned> s_nPeak {0};		// core 0: loudest MIDI sample mixed
+unsigned s_nMidiVolume256 = 256;		// core 0: 64..512 for 25..200 %
 
 unsigned s_nSampleRate = 44100;
 
@@ -662,6 +663,13 @@ void BareMidiMix (s16 *pFrames, unsigned nFrames)
 		unsigned nPeak = s_nPeak.load (std::memory_order_relaxed);
 		for (unsigned i = 0; i < nGot * 2; i++)
 		{
+			// The MIDI volume (boot.conf midi_volume, the menu), relative to
+			// the synthesizer's gain; the sum below saturates.
+			if (s_nMidiVolume256 != 256)
+			{
+				const int nScaled = (Chunk[i] * static_cast<int> (s_nMidiVolume256)) / 256;
+				Chunk[i] = static_cast<s16> (nScaled > 32767 ? 32767 : nScaled < -32768 ? -32768 : nScaled);
+			}
 			const unsigned nAbs = Chunk[i] < 0 ? -Chunk[i] : Chunk[i];
 			if (nAbs > nPeak)
 			{
@@ -709,4 +717,29 @@ void BareMidiLevels (u64 *pRendered, unsigned *pPeak)
 {
 	if (pRendered != nullptr) *pRendered = s_nRendered.load (std::memory_order_relaxed);
 	if (pPeak != nullptr)     *pPeak = s_nPeak.exchange (0, std::memory_order_relaxed);
+}
+
+void BareMidiSetVolume (unsigned nPercent)
+{
+	if (nPercent < 25) nPercent = 25;
+	if (nPercent > 200) nPercent = 200;
+	s_nMidiVolume256 = nPercent * 256 / 100;
+}
+
+void BareMidiSendTestChord (boolean bOn)
+{
+	// For the menu's "Probar MIDI": a C major chord on a piano, through the
+	// same byte path a game's MPU-401 uses.
+	static const u8 Notes[] = { 60, 64, 67, 72 };
+	if (bOn)
+	{
+		BareMidiOutByte (0xC0); BareMidiOutByte (0);		// program: piano
+		BareMidiOutByte (0xB0); BareMidiOutByte (7); BareMidiOutByte (110);
+	}
+	for (u8 n : Notes)
+	{
+		BareMidiOutByte (bOn ? 0x90 : 0x80);
+		BareMidiOutByte (n);
+		BareMidiOutByte (bOn ? 100 : 0);
+	}
 }

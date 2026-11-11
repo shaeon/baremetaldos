@@ -304,6 +304,16 @@ u64     BareAudioDroppedSamples (void);
 ///\t   playing silence, i.e. the emulator was behind real time.
 u64     BareAudioGaps (void);
 
+/// \brief boot.conf audio_out = jack: try the 3.5 mm jack before HDMI.  Before
+///\t   BareAudioInit.
+void    BareAudioPreferJack (boolean bJack);
+
+/// \brief Whole-output volume, 0..100 %, applied after DOSBox's mixer.
+void    BareAudioSetVolume (unsigned nPercent);
+
+/// \brief The output rate, or 0 when running muted.
+unsigned BareAudioSampleRate (void);
+
 // ---------------------------------------------------------------------------
 // Video presentation on core 2 - bare_video.cpp
 // ---------------------------------------------------------------------------
@@ -433,6 +443,12 @@ const char *BareMidiStatus (void);
 
 /// \brief MIDI bytes received from the MPU-401 so far, synthesizer or not.
 u64     BareMidiBytesIn (void);
+
+/// \brief MIDI volume relative to DOSBox's sound, 25..200 %.  Core 0.
+void    BareMidiSetVolume (unsigned nPercent);
+
+/// \brief The menu's MIDI test: a chord on, or off.
+void    BareMidiSendTestChord (boolean bOn);
 
 /// \brief Frames core 1 has rendered so far, and the loudest MIDI sample
 ///\t   mixed since the previous call (reset by the call).  For the panel:
