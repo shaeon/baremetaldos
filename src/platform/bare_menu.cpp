@@ -228,6 +228,10 @@ enum TSettingId
 	SetJoyType,
 	SetJoyTimed,
 	SetJoyDeadzone,
+
+	SetCPUMax = 500,
+	SetGovMode,
+	SetSocMaxTemp,			// cmdline.txt socmaxtemp=
 };
 
 void LiveScaler (const std::string &Value)
@@ -267,6 +271,11 @@ void LiveVolume (const std::string &Value)
 void LiveMidiVolume (const std::string &Value)
 {
 	BareMidiSetVolume (static_cast<unsigned> (atoi (Value.c_str ())));
+}
+
+void LiveGovMode (const std::string &Value)
+{
+	BareSysInfoSetMode (Value.c_str ());
 }
 
 void LiveMouseSpeed (const std::string &Value)
@@ -569,6 +578,33 @@ void DefineSettings (void)
 		  { "25 %", "25" }, { "30 %", "30" } },
 		2, nullptr });
 
+	// --- Rendimiento ---------------------------------------------------------
+
+	s_Settings.push_back ({ SetGovMode, FileBoot, "", "mode", "Modo",
+		"Auto: el governor sube el reloj cuando el emulador no llega y lo baja con la "
+		"pantalla quieta. Máximo: siempre en el nivel más alto. Ahorro: siempre en el más "
+		"bajo. En los tres, si la temperatura llega al límite, el reloj baja.",
+		TApply::Now,
+		{ { "Auto", "auto" }, { "Máximo", "performance" }, { "Ahorro", "powersave" } },
+		0, LiveGovMode });
+
+	s_Settings.push_back ({ SetCPUMax, FileBoot, "", "cpu_max_mhz", "Techo del reloj",
+		"El reloj más alto que usará el governor. Sin límite: el máximo del firmware "
+		"(1500 o 1800 en una Pi 4, 2400 en una Pi 5). Útil en una caja sin ventilación.",
+		TApply::RestartBoard,
+		{ { "Sin límite", "0" }, { "600 MHz", "600" }, { "1000 MHz", "1000" },
+		  { "1200 MHz", "1200" }, { "1500 MHz", "1500" }, { "1800 MHz", "1800" },
+		  { "2000 MHz", "2000" }, { "2400 MHz", "2400" } },
+		0, nullptr });
+
+	s_Settings.push_back ({ SetSocMaxTemp, FileCmdline, "", "socmaxtemp", "Límite de temperatura",
+		"A partir de esta temperatura el governor baja el reloj un nivel cada vez. Se "
+		"guarda en cmdline.txt (socmaxtemp=).",
+		TApply::RestartBoard,
+		{ { "60 °C", "60" }, { "65 °C", "65" }, { "70 °C", "70" }, { "75 °C", "75" },
+		  { "80 °C", "80" }, { "85 °C", "85" } },
+		4, nullptr });
+
 	// The default SoundFont: default.sf2 if the card has it.
 	if (TSetting *pFont = FindSetting (SetSoundFont))
 	{
@@ -675,6 +711,10 @@ void LoadSettings (void)
 		else if (S.File == FileBoot)
 		{
 			bFound = BootConf.Get (S.pSection, S.pKey, &Value);
+		}
+		else if (S.File == FileCmdline)
+		{
+			bFound = bareconf::CmdlineGet (Cmdline, S.pKey, &Value);
 		}
 		else if (S.nId == SetKeyb)
 		{
@@ -812,6 +852,7 @@ bool SaveSettings (void)
 	{
 		if (S.nPending == S.nSaved) continue;
 		if (S.nId == SetDisplay) { bCmdline = true; bBoot = true; }
+		else if (S.File == FileCmdline) bCmdline = true;
 		else if (S.File == FileBoot) bBoot = true;
 		else if (S.File == FileDOSBox) bDOSBox = true;
 	}
@@ -822,13 +863,23 @@ bool SaveSettings (void)
 
 	if (bCmdline)
 	{
-		const TSetting *pDisplay = FindSetting (SetDisplay);
 		std::string Text;
 		ReadText (CmdlinePath, &Text);
-		const std::string &Mode = pDisplay->Choices[pDisplay->nPending].Value;
-		const size_t x = Mode.find ('x');
-		Text = bareconf::CmdlineSet (Text, "width", Mode.substr (0, x));
-		Text = bareconf::CmdlineSet (Text, "height", Mode.substr (x + 1));
+		const TSetting *pDisplay = FindSetting (SetDisplay);
+		if (pDisplay->nPending != pDisplay->nSaved)
+		{
+			const std::string &Mode = pDisplay->Choices[pDisplay->nPending].Value;
+			const size_t x = Mode.find ('x');
+			Text = bareconf::CmdlineSet (Text, "width", Mode.substr (0, x));
+			Text = bareconf::CmdlineSet (Text, "height", Mode.substr (x + 1));
+		}
+		for (const TSetting &S : s_Settings)
+		{
+			if (S.File == FileCmdline && S.nId != SetDisplay && S.nPending != S.nSaved)
+			{
+				Text = bareconf::CmdlineSet (Text, S.pKey, S.Choices[S.nPending].Value);
+			}
+		}
 		bOk = WriteText (CmdlinePath, Text) && bOk;
 	}
 
@@ -1374,12 +1425,38 @@ void BuildPages (void)
 		Pages.push_back (P);
 	}
 
-	Pages.push_back (PagePlanned ("Rendimiento", "Reloj de la placa y temperatura.",
 	{
-		{ "Techo del reloj", TApply::Now },
-		{ "Modo del governor", TApply::Now },
-		{ "Límite de temperatura", TApply::RestartBoard },
-	}));
+		TPage P;
+		P.Title = "Rendimiento";
+		P.Help = "Reloj de la placa y temperatura.";
+
+		unsigned nArmMHz = 0, nCoreMHz = 0, nCelsius = 0;
+		BareSysInfoGet (&nArmMHz, &nCoreMHz, &nCelsius);
+		unsigned Levels[8] = {};
+		const unsigned nLevels = BareSysInfoGovernorLevels (Levels);
+		std::string LevelText;
+		for (unsigned i = 0; i < nLevels && i < 8; i++)
+		{
+			LevelText += (i ? " / " : "") + Format ("%u", Levels[i]);
+		}
+
+		P.Items =
+		{
+			Section ("Governor"),
+			SettingItem (*FindSetting (SetGovMode)),
+			SettingItem (*FindSetting (SetCPUMax)),
+			SettingItem (*FindSetting (SetSocMaxTemp)),
+			Section ("Ahora"),
+			Info ("Reloj ARM", Format ("%u MHz", nArmMHz)),
+			Info ("Niveles (MHz)", LevelText.empty () ? std::string ("-") : LevelText,
+			      "Los relojes entre los que se mueve el governor en esta placa."),
+			Info ("Estado", BareSysInfoGovernorState (),
+			      "Lo mismo que muestra el panel (PetSis): el nivel, y si el emulador va "
+			      "holgado o justo."),
+			Info ("Temperatura", Format ("%u °C", nCelsius)),
+		};
+		Pages.push_back (P);
+	}
 
 	Pages.push_back (PagePlanned ("Red", "Conexión de la placa y red para DOS.",
 	{

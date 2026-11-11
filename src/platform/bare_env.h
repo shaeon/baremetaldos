@@ -538,6 +538,11 @@ const char *BareSysInfoGovernorState (void);
 /// \brief Cap the top governor level, from boot.conf (0 = no cap).
 void BareSysInfoSetCPUMax (unsigned nMHz);
 
+/// \brief boot.conf mode: "auto" (the governor decides), "performance" (the
+///\t   top level) or "powersave" (the bottom one).  The temperature veto
+///\t   applies in all three.  Takes effect on the next frame.
+void BareSysInfoSetMode (const char *pMode);
+
 /// \brief Feed the governor the duration of one emulated frame and its budget.
 ///\t   Called once per frame from the frame loop; it decides on its own
 ///\t   schedule whether to change the ARM clock rate.

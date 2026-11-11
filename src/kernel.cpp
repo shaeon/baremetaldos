@@ -452,6 +452,7 @@ boolean CKernel::Initialize (void)
 	// A ceiling from boot.conf goes in before the governor picks its levels, so
 	// that "cpu_max_mhz=1500" means what it says.
 	BareSysInfoSetCPUMax (Config.nCPUMaxMHz);
+	BareSysInfoSetMode (Config.Mode);
 	BareSysInfoSetPerformance ();
 
 	// --- audio ------------------------------------------------------------

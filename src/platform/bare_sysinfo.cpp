@@ -313,6 +313,12 @@ struct TLevel
 TLevel s_Levels[3] = { { LowHz }, { MidHz }, { DefaultMaxHz } };
 unsigned s_nLevels = 3;
 unsigned s_nLevel = 0;			// index into s_Levels
+
+// boot.conf mode: 0 auto (the governor decides), 1 performance (the top
+// level), 2 powersave (the bottom level).  The temperature veto applies in all
+// three: a pinned level is where the clock goes back to once the SoC has
+// cooled, not a reason to cook it.
+unsigned s_nPinned = 0;
 boolean s_bGovernorReady = FALSE;	// TRUE once the firmware accepted a change
 // Starts as TRUE on purpose: the first call with FALSE - "no game is presenting
 // frames" - has to be a *transition*, and it is the one that takes the board
@@ -783,6 +789,24 @@ void BareSysInfoGovernorTick (unsigned nFrameMicros, unsigned nBudgetMicros,
 		return;
 	}
 
+	// mode = performance / powersave: no judging, no idle rules - the pinned
+	// level, except that the temperature veto still takes the clock down one
+	// level at a time while the SoC is at or above its limit.
+	if (s_nPinned != 0)
+	{
+		const bool bHot = s_nTemperature != 0 && s_nTemperature >= s_nVetoCelsius;
+		const unsigned nTarget = s_nPinned == 1 ? s_nLevels - 1 : 0;
+		if (bHot && s_nLevel > 0)
+		{
+			SetLevel (s_nLevel - 1);
+		}
+		else if (!bHot && s_nLevel != nTarget && NowMicros () - s_nLevelSince >= IdleStepMicros)
+		{
+			SetLevel (nTarget);
+		}
+		return;
+	}
+
 	// ---------------------------------------------------------------------
 	// .59: the prompt never got back to 600 MHz either
 	// ---------------------------------------------------------------------
@@ -1139,4 +1163,14 @@ void BareSysInfoServiceTick (void)
 	{
 		s_nPubFirmwareMode.store (Tag.nValue, std::memory_order_relaxed);
 	}
+}
+
+void BareSysInfoSetMode (const char *pMode)
+{
+	s_nPinned = pMode == nullptr ? 0
+		  : strcmp (pMode, "performance") == 0 ? 1
+		  : strcmp (pMode, "powersave") == 0 ? 2 : 0;
+
+	// Applied on the next governor tick (the next frame), which is also where
+	// the temperature veto is checked first.
 }
