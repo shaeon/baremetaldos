@@ -432,15 +432,16 @@ boolean CKernel::Initialize (void)
 	// status lines, which draw into the port's own pages.
 	mLogger.SetNewTarget (&mSerial);
 
-	// And newlib's stdout / stderr, for the same reason: circle-stdlib binds
-	// them to a console on that same screen device, so a library that prints
-	// (FluidSynth's warnings did, over the setup menu) drew into page 1.  A
-	// console on the serial port in both directions replaces it.
-	static CConsole s_SerialConsole (&mSerial, &mSerial);
-	if (s_SerialConsole.Initialize ())
-	{
-		CGlueStdioInit (s_SerialConsole);
-	}
+	// newlib's stdout / stderr still go to circle-stdlib's console on the
+	// screen device, so a library that prints draws into page 1 - FluidSynth's
+	// warnings did, over the setup menu.  They cannot be moved to the serial
+	// port from here: CGlueStdioInit() may be called only once (it asserts that
+	// stdin, stdout and stderr are not open yet, and circle-stdlib has opened
+	// them), and a second call stopped the board right after the "fb:" lines,
+	// with the assertion's message on the serial port the log had just moved
+	// to.  So the printing is stopped at the source instead: FluidSynth's log
+	// goes to Circle's log (bare_midi.cpp), and DOSBox's goes through the
+	// libretro log callback.
 
 	m_nStatusLine = 0;
 

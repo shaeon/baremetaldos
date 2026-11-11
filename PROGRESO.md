@@ -1,7 +1,8 @@
 # Progreso del trabajo de Shaeon en BM-DOS
 
 Fichero de trabajo para retomar el trabajo si una sesión se corta. Se
-actualiza al terminar cada paso, y se lee al empezar cada sesión.
+actualiza al empezar y al terminar cada paso, y se lee al empezar cada sesión.
+(Estuvo en docs/PROGRESO.md; docs/ está en el .gitignore del proyecto.)
 
 **Regla al empezar una sesión:** `git status` y `git log -3`.  Si hay cambios sin
 guardar o commits que no aparecen aquí, son de un intento interrumpido: se
@@ -43,10 +44,19 @@ están en local y en el bundle, pendientes de push.
 | (el de "fix: firmware calls from two cores, stdout off the screen...") | Fallos vistos en placa: carrera en el búfer del firmware de Circle (parche), stdout fuera de la pantalla, MIDI que perdía eventos sin consumo de audio |
 | (el de "boot: BIOS-style logo, no rainbow splash...") | Logo de arranque original, sin arcoíris (disable_splash), boot_delay=0, NTP 5 s máx., tiempo de arranque en pantalla |
 | (el de "web: password from the page, rename, move, free space") | Servidor web al estilo ZXMetalCircle: contraseña desde la web, renombrar, mover, espacio libre |
+| (el de "fix: the boot stopped after the \"fb:\" lines") | Cuelgue al arrancar (foto del usuario): segunda llamada a CGlueStdioInit (assert) del commit 6ca96f0; quitada.  PROGRESO.md pasa a la raíz |
 
 ## En curso
 
-- Nada.
+- **Apartado, sin aprobar:** trabajo encontrado de un intento interrumpido de
+  "Ctrl+Alt+Supr como en un PC" (parche a DOSBox-core, reinicio de DOS sin
+  reiniciar la placa, menú).  Su nota decía "decidido con el usuario", pero en
+  la conversación el usuario aún no lo había aprobado.  Guardado en
+  `git stash` ("WIP encontrado: Ctrl+Alt+Supr...") y el cambio que había
+  aplicado al árbol de DOSBox-core en `/home/claude/dosbox-core-wip-ctrlaltdel.diff`;
+  el árbol de DOSBox-core se ha devuelto a la revisión fijada.  Retomarlo solo
+  con el visto bueno del usuario (`git stash pop`, revisar, `make fetch` aplica
+  el parche de patches/dosbox-core/).
 
 ## Pendiente
 

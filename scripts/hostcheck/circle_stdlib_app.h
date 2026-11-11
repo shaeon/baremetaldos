@@ -73,16 +73,6 @@ private:
 // firmware has handed to the port's second page.
 class CSerialDevice : public CDevice {};
 
-// The kernel rebinds newlib's stdio to a console on the serial port once the
-// port owns the display (circle-stdlib's own console draws on the screen).
-class CConsole
-{
-public:
-	CConsole (CDevice *pInput, CDevice *pOutput) { (void) pInput; (void) pOutput; }
-	boolean Initialize (void) { return TRUE; }
-};
-inline void CGlueStdioInit (CConsole &) {}
-
 class CStdlibAppStdio : public CStdlibApp {
 public:
 	CStdlibAppStdio (const char *pName) : CStdlibApp (pName), mScreen (0, 0) {}
