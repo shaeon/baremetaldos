@@ -110,10 +110,30 @@ cuentas salen del metrónomo  [x] pruebas PC  [x] compilar  [x] commit + bundle 
       FALTA: releer LoadSettings (valores a medida, nDefault), "Fijar la IP
       actual", Discard/LoadDefaults con los ajustes en vivo, y probar en placa
       cada pestaña (cambiar, F10, mirar el fichero en el PC).
-- [ ] R3. Arranque: orden, esperas, logo, SUPR, reinicio de DOS.
-- [ ] R4. Audio y MIDI: colas, descartes (drop), volumen, pruebas de sonido.
-- [ ] R5. Vídeo: presentador, menú encima, restaurar pantalla.
-- [ ] R6. Red: WiFi, NTP, servidor web, módem/IPX.
+**R3-R6 APROBADOS por el usuario (12-nov): revisar y arreglar, en orden.**
+- [x] R3. Arranque: orden, esperas, logo, SUPR, reinicio de DOS.  Encontrado y
+      corregido: (a) "arranque: X s" se medía antes de cargar DOSBox (lo más
+      lento); ahora después de "core: load ok"; (b) en el menú del arranque
+      (SUPR, antes de que exista DOSBox) guardar opciones R pedía reiniciar
+      DOS y ese reinicio corría justo tras arrancar: s_bBeforeDos; (c) tras
+      reiniciar DOS el menú seguía mostrando las imágenes de A:/D:
+      (BareMenuOnDosRestart).  Revisado sin cambios: orden de init, NTP solo
+      si hay red configurada, doble cierre del MIDI aparcado (inofensivo).
+- [x] R4. Audio y MIDI: releído BareAudioQueue (mezcla MIDI, filtro de
+      continua, limitador, volumen, descartes, huecos) y el cierre aparcado
+      del MIDI: sin fallos.  Sigue pendiente la saturación MIDI en DOOM
+      (necesita una grabación del usuario).
+- [x] R5. Vídeo: el mensaje "Reiniciando DOS..." se presenta ANTES de
+      desmontar DOSBox, así que la última imagen guardada nunca apunta a un
+      búfer liberado; menú encima y restaurar, bien.  Sin cambios.
+- [x] R6. Red: el servidor web espera la red en su tarea (bien).  Encontrado:
+      FatFs sin bloqueo (FF_FS_LOCK 0): borrar/mover/renombrar desde la web
+      un fichero que DOS tiene abierto puede corromper el volumen.  Hecho lo
+      seguro: la web rechaza tocar una imagen metida en A:/D: (o su carpeta)
+      con BareDiskInUse.  **PREGUNTA AL USUARIO pendiente:** activar
+      FF_FS_LOCK (parche a Circle) para cubrir los ficheros abiertos por los
+      juegos; coste: límite de ficheros abiertos a la vez (p. ej. 64).
+      Compilado y en el commit "review R3-R6: ...".  Falta la respuesta a la PREGUNTA.
 - [ ] R7. Governor y ritmo (P1/P2 de la hoja de ruta).
 - [ ] R8. CI, make-sd, parches, README.
 

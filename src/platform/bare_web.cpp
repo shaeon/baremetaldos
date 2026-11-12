@@ -180,6 +180,13 @@ bool SavePassword (const std::string &Password)
 	return rename ("SD:/boot.conf.new", "SD:/boot.conf") == 0;
 }
 
+// Why a delete, rename or move is refused: a disk image DOS has in a drive.
+std::string InUse (char cDrive)
+{
+	return std::string ("Está metido en la unidad ") + cDrive + ": de DOS (o lo está algo de "
+	       "dentro de esta carpeta). Sácalo antes en el menú: Win+F12, Unidades.";
+}
+
 std::string FreeSpace (void)
 {
 	const u64 nFree = BareCardFreeBytes ();
@@ -503,6 +510,12 @@ void Handle (CSocket *pSocket)
 			return;
 		}
 
+		if (const char cDrive = BareDiskInUse (Path.c_str ()))
+		{
+			Respond (pSocket, "409 Conflict", "text/plain; charset=utf-8", InUse (cDrive));
+			return;
+		}
+
 		std::string To;
 		if (R.Path == "/rename")
 		{
@@ -564,6 +577,11 @@ void Handle (CSocket *pSocket)
 	}
 	else if (R.Method == "POST" && R.Path == "/delete" && Path != "/")
 	{
+		if (const char cDrive = BareDiskInUse (Path.c_str ()))
+		{
+			Respond (pSocket, "409 Conflict", "text/plain; charset=utf-8", InUse (cDrive));
+			return;
+		}
 		const bool bOk = RemoveTree (Path);
 		CLogger::Get ()->Write (FromWeb, LogNotice, "delete %s: %s", Path.c_str (), bOk ? "ok" : "failed");
 		Respond (pSocket, bOk ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",

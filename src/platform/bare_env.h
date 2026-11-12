@@ -369,6 +369,10 @@ void    BareMenuTick (void);
 ///\t   (the boot screen then needs redrawing).  0 seconds returns at once.
 boolean BareMenuBootWindow (unsigned nSeconds);
 
+/// \brief DOS was restarted (bare_libretro.cpp): forget the disk images the
+///\t   menu had put in A: and D:.
+void    BareMenuOnDosRestart (void);
+
 /// \brief A one-line message on a blue screen, presented like a frame (both
 ///\t   video_core modes): "Reiniciando DOS...".
 void    BareMenuShowMessage (const char *pText);
@@ -398,6 +402,12 @@ void    BareThreadResetForRestart (void);
 boolean BareDiskInsert (const char *pPath);
 boolean BareDiskEject (char cDrive);
 boolean BareDiskAvailable (void);
+
+/// \brief The drive ('A' or 'D') holding the disk image at this card path, or
+///\t   at a path inside this folder; 0 if none.  The web server refuses to
+///\t   delete, rename or move what DOS has in a drive: FatFs keeps no lock
+///\t   (FF_FS_LOCK 0), and removing an open file can corrupt the volume.
+char    BareDiskInUse (const char *pCardPath);
 
 /// \brief Take presentation back to core 0 (before anything else draws on
 ///\t   the screen, e.g. at shutdown).  Waits for core 2 to stop; leaves the

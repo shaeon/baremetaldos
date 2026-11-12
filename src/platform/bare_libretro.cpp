@@ -1420,6 +1420,7 @@ boolean BareCoreRestart (void)
 	s_bDiskControl = FALSE;
 	s_DiskPaths.clear ();
 	s_nDiskInDrive[0] = s_nDiskInDrive[1] = -1;
+	BareMenuOnDosRestart ();
 
 	// Up again.
 	const boolean bOk = BareCoreInit () && BareCoreLoadGame (s_ContentPath);
@@ -1433,4 +1434,34 @@ boolean BareCoreRestart (void)
 	CLogger::Get ()->Write (FromBare, LogNotice, "DOS restarted in %u ms",
 				static_cast<unsigned> ((BareMicros () - nStart) / 1000));
 	return TRUE;
+}
+
+char BareDiskInUse (const char *pCardPath)
+{
+	// A path of the card ("/dos/ISO/X.ISO", as the web server and the menu
+	// write them), or a folder holding one: is it in A: or D: now?  FAT names
+	// do not care about case.  Returns the drive letter, or 0.
+	if (pCardPath == nullptr || pCardPath[0] == '\0')
+	{
+		return 0;
+	}
+	const size_t nLen = strlen (pCardPath);
+	for (unsigned nDrive = 0; nDrive < 2; nDrive++)
+	{
+		const int nIndex = s_nDiskInDrive[nDrive];
+		if (nIndex < 0 || static_cast<size_t> (nIndex) >= s_DiskPaths.size ())
+		{
+			continue;
+		}
+		const std::string &Image = s_DiskPaths[static_cast<size_t> (nIndex)];
+		const bool bSame = strcasecmp (Image.c_str (), pCardPath) == 0;
+		const bool bInside = Image.size () > nLen && Image[nLen] == '/'
+				     && strncasecmp (Image.c_str (), pCardPath, nLen) == 0;
+		const bool bRoot = nLen == 1 && pCardPath[0] == '/';
+		if (bSame || bInside || bRoot)
+		{
+			return nDrive == 0 ? 'A' : 'D';
+		}
+	}
+	return 0;
 }

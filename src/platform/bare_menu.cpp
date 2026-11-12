@@ -143,6 +143,12 @@ std::string s_BootPending;
 std::atomic<bool> s_bBootWindow {false};
 bool s_bOpenedAtBoot = false;
 
+// The menu is open at boot, before DOSBox exists (BareMenuBootWindow): an R
+// setting needs no DOS restart then - DOSBox reads the files when it starts,
+// a moment later.  Without this, saving one asked to restart DOS, and the
+// restart ran right after the boot: a second DOSBox start for nothing.
+bool s_bBeforeDos = false;
+
 std::string s_FloppyImage;		// what this menu put in A: / D:, for display
 std::string s_CDImage;
 
@@ -2160,7 +2166,7 @@ void AskToLeave (void)
 void SaveAndLeave (bool bRestart)
 {
 	const bool bBoard = ModifiedNeedsBoard ();
-	const bool bDos = ModifiedNeedsDos ();
+	const bool bDos = ModifiedNeedsDos () && !s_bBeforeDos;
 	if (AnyModified () && !SaveSettings ())
 	{
 		s_Menu.OpenDialog (DlgSaveFailed, "No se pudo guardar",
@@ -2179,7 +2185,10 @@ void SaveAndLeave (bool bRestart)
 			return;
 		}
 		Close ();
-		BareCoreRequestDosRestart ();
+		if (!s_bBeforeDos)
+		{
+			BareCoreRequestDosRestart ();
+		}
 		return;
 	}
 
@@ -2508,7 +2517,10 @@ void HandleEvent (const TEvent &Ev)
 		case ActRestartDos:
 			Discard ();
 			Close ();
-			BareCoreRequestDosRestart ();
+			if (!s_bBeforeDos)		// at boot DOS starts in a moment anyway
+			{
+				BareCoreRequestDosRestart ();
+			}
 			break;
 		default:
 			break;
@@ -2812,6 +2824,7 @@ boolean BareMenuBootWindow (unsigned nSeconds)
 	}
 
 	s_bOpenedAtBoot = false;
+	s_bBeforeDos = true;
 	s_bBootWindow.store (true, std::memory_order_release);
 
 	const u64 nEnd = BareMicros () + static_cast<u64> (nSeconds) * 1000000;
@@ -2831,6 +2844,7 @@ boolean BareMenuBootWindow (unsigned nSeconds)
 	}
 
 	s_bBootWindow.store (false, std::memory_order_release);
+	s_bBeforeDos = false;
 	return s_bOpenedAtBoot ? TRUE : FALSE;
 }
 
@@ -2851,4 +2865,13 @@ void BareMenuShowMessage (const char *pText)
 	Message.Put (n < Cols ? (Cols - n) / 2 : 0, Rows / 2, Text, White, Blue);
 	RenderScreen (Message, Font8x16, s_pPixels, PixelWidth);
 	BareVideoPresent (s_pPixels, PixelWidth, PixelHeight, PixelWidth * sizeof (u32));
+}
+
+void BareMenuOnDosRestart (void)
+{
+	// The images the menu put in A: and D: are gone with the old machine: the
+	// new one has what its autoexec mounts.  The Unidades page must not keep
+	// showing their names.
+	s_FloppyImage.clear ();
+	s_CDImage.clear ();
 }

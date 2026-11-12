@@ -600,12 +600,6 @@ boolean CKernel::Initialize (void)
 
 	Report ("core: init ok");
 
-	// How long the boot took from the kernel's start (the firmware's own part,
-	// before the kernel, is not counted: a stopwatch from power-on for that).
-	{
-		const unsigned nMillis = static_cast<unsigned> (BareMicros () / 1000);
-		Report ("arranque: %u,%u s desde el kernel", nMillis / 1000, nMillis % 1000 / 100);
-	}
 
 	// Every frame boundary inside DOSBox comes back to us here.
 	BareCoreSetFrameHook (FrameHook, this);
@@ -631,6 +625,15 @@ boolean CKernel::Initialize (void)
 	}
 
 	Report ("core: load ok");
+
+	// How long the boot took, from the kernel's start to DOSBox loaded - its
+	// start, dosbox.conf and a SoundFont are the slowest part, so they count.
+	// The firmware's own part, before the kernel, does not: a stopwatch from
+	// power-on for that.
+	{
+		const unsigned nMillis = static_cast<unsigned> (BareMicros () / 1000);
+		Report ("arranque: %u,%u s desde el kernel", nMillis / 1000, nMillis % 1000 / 100);
+	}
 
 	// ---------------------------------------------------------------------
 	// .65e: the rate at the DOS prompt, and the 1800 MHz nobody asked for
