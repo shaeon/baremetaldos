@@ -50,6 +50,14 @@ están en local y en el bundle, pendientes de push.
 
 ## En curso
 
+**Punto 2 (governor por fotograma emulado + ver qué hace) - HECHO, pendiente de
+probar en placa:** en la escena del 12-nov, "over" debe dejar de crecer y el
+reloj bajar si la carga media queda por debajo del 75 %.
+Pasos: [x] trabajo por fotograma (kernel: dividir por las fronteras de la
+llamada)  [x] contadores en bare_sysinfo (SetLevel con motivo; subidas,
+bajadas, tiempo por nivel, carga media)  [x] mostrarlos en Rendimiento
+[x] pruebas PC  [x] compilar  [x] commit + bundle ("governor: work per emulated frame...").
+
 ### Revisión completa del proyecto (pedida por el usuario, 12-nov)
 
 "Ahora que funciona y estamos afinando: revísalo y ve arreglando lo que veas;

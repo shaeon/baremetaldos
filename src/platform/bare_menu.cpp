@@ -1880,6 +1880,14 @@ void BuildPages (void)
 		BareSysInfoGet (&nArmMHz, &nCoreMHz, &nCelsius);
 		unsigned Levels[8] = {};
 		const unsigned nLevels = BareSysInfoGovernorLevels (Levels);
+		TBareGovernorStats Gov;
+		BareSysInfoGovernorStats (&Gov);
+		std::string LevelShare;
+		for (unsigned i = 0; i < Gov.nLevels && i < 8; i++)
+		{
+			LevelShare += (i ? "  " : "") + Format ("%u: %u %%", Gov.nMHz[i], Gov.nPercentAt[i]);
+		}
+		if (LevelShare.empty ()) LevelShare = "-";
 		std::string LevelText;
 		for (unsigned i = 0; i < nLevels && i < 8; i++)
 		{
@@ -1896,6 +1904,21 @@ void BuildPages (void)
 			Info ("Reloj ARM", Format ("%u MHz", nArmMHz)),
 			Info ("Niveles (MHz)", LevelText.empty () ? std::string ("-") : LevelText,
 			      "Los relojes entre los que se mueve el governor en esta placa."),
+			Section ("Lo que hace el governor"),
+			Info ("Carga", Gov.nLevels != 0 ? Format ("%u %% de cada fotograma", Gov.nLoadPercent)
+							  : std::string ("-"),
+			      "El trabajo de cada fotograma emulado frente al tiempo que tiene (14,3 ms "
+			      "a 70 Hz), en media.  Por encima del 90 % el fotograma no llega y, si "
+			      "sigue así, el governor sube el reloj; por debajo del 75 % va holgado y "
+			      "lo baja al cabo de un rato."),
+			Info ("Cambios", Format ("%u subidas, %u bajadas", Gov.nUps, Gov.nDowns)),
+			Info ("Último", Gov.pLastReason != nullptr && Gov.pLastReason[0] != '\0'
+					 ? Format ("%s, hace %u s", Gov.pLastReason, Gov.nSecondsSinceChange)
+					 : std::string ("ninguno todavía"),
+			      "Por qué cambió el reloj la última vez: no llega, va holgado, pantalla "
+			      "quieta, prompt de DOS, temperatura o el modo fijo."),
+			Info ("Tiempo en cada nivel", LevelShare,
+			      "Qué parte del tiempo desde el arranque ha pasado en cada reloj."),
 			Info ("Estado", BareSysInfoGovernorState (),
 			      "Lo mismo que muestra el panel (PetSis): el nivel, y si el emulador va "
 			      "holgado o justo."),

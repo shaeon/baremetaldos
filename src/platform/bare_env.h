@@ -652,6 +652,21 @@ unsigned BareSysInfoGovernorLevels (unsigned *pMHz);
 ///\t   "it never ran".
 const char *BareSysInfoGovernorState (void);
 
+/// What the governor has done (the setup menu's Rendimiento page).
+struct TBareGovernorStats
+{
+	unsigned nLevels;		///< 0 while the governor is not running
+	unsigned nLevel;
+	unsigned nMHz[8];		///< each level's clock
+	unsigned nPercentAt[8];		///< share of the time spent at each level
+	unsigned nUps;
+	unsigned nDowns;
+	const char *pLastReason;	///< why the last change ("" = none yet)
+	unsigned nSecondsSinceChange;
+	unsigned nLoadPercent;		///< work per emulated frame / its budget, smoothed
+};
+void BareSysInfoGovernorStats (TBareGovernorStats *pStats);
+
 /// \brief Cap the top governor level, from boot.conf (0 = no cap).
 void BareSysInfoSetCPUMax (unsigned nMHz);
 

@@ -1335,8 +1335,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		// frame to its time, inside that call.  Its waits are waiting, not
 		// work: they count in the panel's w%, and they come off what the
 		// governor sees - otherwise the time spent holding the machine back
-		// would read as load and raise the clock.  (Judging the work per
-		// emulated frame rather than per call is item 2 of the list, apart.)
+		// would read as load and raise the clock.
 		const u64 nPaceWait = BareThreadTakePaceWaitMicros ();
 		nWaitMicros += nPaceWait;
 		if (nPaceWait < 1000)
@@ -1344,8 +1343,14 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 			nZeroWaitFrames++;		// no time to spare in this call
 			nLateFrames++;
 		}
-		(void) BareThreadTakeCallBoundaries ();	// item 2 (governor per frame), not yet
-		const u64 nWorkMicros = nCallMicros > nPaceWait ? nCallMicros - nPaceWait : 0;
+		// And per EMULATED FRAME: a call can hold two boundaries (or none,
+		// if the emulator stopped short), and the budget is one frame's.
+		// Judged per call, two frames of 12.8 ms read as 25.7 ms against
+		// 14.3 - "over3215" at the top clock while the machine was in fact
+		// ahead of real time (the panel on the board, 12-nov).
+		const unsigned nCallFrames = BareThreadTakeCallBoundaries ();
+		const u64 nWorkMicros = (nCallMicros > nPaceWait ? nCallMicros - nPaceWait : 0)
+					/ (nCallFrames != 0 ? nCallFrames : 1);
 
 		// The metronome's trim from the sound queue, ten times a second.
 		{

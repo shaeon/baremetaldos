@@ -404,7 +404,17 @@ boolean SetArmClock (unsigned nHz)
 }
 
 /// \brief Move to level nTo, if the firmware agrees.  Resets the counters.
-boolean SetLevel (unsigned nTo)
+// What the governor did, for the setup menu's Rendimiento page (item 2 of the
+// list: "see what it does").  Times per level are accumulated when the level
+// changes, and the current level's share is added when they are read.
+u64 s_nLevelMicros[8] = {};
+unsigned s_nUps = 0;
+unsigned s_nDowns = 0;
+const char *s_pLastReason = "";
+u64 s_nLastChangeMicros = 0;
+unsigned s_nLoadPermille = 0;		// work / budget, smoothed (1000 = all of it)
+
+boolean SetLevel (unsigned nTo, const char *pReason)
 {
 	if (nTo >= s_nLevels || nTo == s_nLevel)
 	{
@@ -417,8 +427,17 @@ boolean SetLevel (unsigned nTo)
 
 	if (bOk)
 	{
+		const u64 nNow = NowMicros ();
+		if (s_nLevelSince != 0 && s_nLevel < 8)
+		{
+			s_nLevelMicros[s_nLevel] += nNow - s_nLevelSince;
+		}
+		if (nTo > s_nLevel) s_nUps++; else s_nDowns++;
+		s_pLastReason = pReason;
+		s_nLastChangeMicros = nNow;
+
 		s_nLevel = nTo;
-		s_nLevelSince = NowMicros ();
+		s_nLevelSince = nNow;
 	}
 
 	s_nOverrunFrames = 0;
@@ -717,7 +736,7 @@ void BareSysInfoSetCLIActivity (boolean bActive)
 
 		if (bWasIdleLongEnough)
 		{
-			SetLevel (s_nLevels > 2 ? 1 : 0);
+			SetLevel (s_nLevels > 2 ? 1 : 0, "arranque del governor");
 		}
 	}
 	else
@@ -798,11 +817,11 @@ void BareSysInfoGovernorTick (unsigned nFrameMicros, unsigned nBudgetMicros,
 		const unsigned nTarget = s_nPinned == 1 ? s_nLevels - 1 : 0;
 		if (bHot && s_nLevel > 0)
 		{
-			SetLevel (s_nLevel - 1);
+			SetLevel (s_nLevel - 1, "temperatura");
 		}
 		else if (!bHot && s_nLevel != nTarget && NowMicros () - s_nLevelSince >= IdleStepMicros)
 		{
-			SetLevel (nTarget);
+			SetLevel (nTarget, s_nPinned == 1 ? "modo Máximo" : "modo Ahorro");
 		}
 		return;
 	}
@@ -861,7 +880,7 @@ void BareSysInfoGovernorTick (unsigned nFrameMicros, unsigned nBudgetMicros,
 
 			if (s_nLevel > 0 && NowMicros () - s_nLevelSince >= IdleStepMicros)
 			{
-				SetLevel (s_nLevel - 1);
+				SetLevel (s_nLevel - 1, "pantalla quieta");
 			}
 		}
 	}
@@ -874,7 +893,7 @@ void BareSysInfoGovernorTick (unsigned nFrameMicros, unsigned nBudgetMicros,
 	{
 		if (s_nLevel > 0 && NowMicros () - s_nLevelSince >= IdleStepMicros)
 		{
-			SetLevel (s_nLevel - 1);
+			SetLevel (s_nLevel - 1, "prompt de DOS");
 		}
 
 		return;
@@ -936,12 +955,21 @@ void BareSysInfoGovernorTick (unsigned nFrameMicros, unsigned nBudgetMicros,
 	// first, otherwise the next person to read this would chase it again.
 	if (s_nTemperature != 0 && s_nTemperature >= s_nVetoCelsius && s_nLevel > 0)
 	{
-		SetLevel (s_nLevel - 1);
+		SetLevel (s_nLevel - 1, "temperatura");
 		return;
 	}
 
 	const governor::TVerdict Verdict = governor::Judge (nFrameMicros, nBudgetMicros);
 	s_nLastVerdict = Verdict;
+
+	// The load, smoothed over about a second of frames (1/64 per frame), for
+	// the menu: how much of each frame's time the work takes.
+	{
+		const unsigned nNow = nBudgetMicros != 0
+			? static_cast<unsigned> (static_cast<u64> (nFrameMicros) * 1000 / nBudgetMicros) : 0;
+		const unsigned nClamped = nNow > 2000 ? 2000 : nNow;
+		s_nLoadPermille = s_nLoadPermille + (static_cast<int> (nClamped) - static_cast<int> (s_nLoadPermille)) / 64;
+	}
 
 	if (Verdict == governor::TVerdict::Overrun)
 	{
@@ -1000,7 +1028,7 @@ void BareSysInfoGovernorTick (unsigned nFrameMicros, unsigned nBudgetMicros,
 	// high, so down is slower - just not forbidden.
 	if (s_nLevel + 1 < s_nLevels && bSustainedOverrun)
 	{
-		SetLevel (s_nLevel + 1);
+		SetLevel (s_nLevel + 1, "no llega");
 	}
 	else if (s_nLevel > 0 && nElapsed >= StepDownMicros)
 	{
@@ -1014,7 +1042,7 @@ void BareSysInfoGovernorTick (unsigned nFrameMicros, unsigned nBudgetMicros,
 		// used to be a permanent reason to stay at the top.
 		if (bComfortable || (bNotOverrunning && nElapsed >= StepDownIdleMicros))
 		{
-			SetLevel (s_nLevel - 1);
+			SetLevel (s_nLevel - 1, "va holgado");
 		}
 	}
 }
@@ -1173,4 +1201,36 @@ void BareSysInfoSetMode (const char *pMode)
 
 	// Applied on the next governor tick (the next frame), which is also where
 	// the temperature veto is checked first.
+}
+
+void BareSysInfoGovernorStats (TBareGovernorStats *pStats)
+{
+	if (pStats == nullptr)
+	{
+		return;
+	}
+	*pStats = TBareGovernorStats {};
+	pStats->nLevels = s_bGovernorReady ? s_nLevels : 0;
+	pStats->nLevel = s_nLevel;
+	pStats->nUps = s_nUps;
+	pStats->nDowns = s_nDowns;
+	pStats->pLastReason = s_pLastReason;
+	pStats->nSecondsSinceChange = s_nLastChangeMicros != 0
+		? static_cast<unsigned> ((NowMicros () - s_nLastChangeMicros) / 1000000) : 0;
+	pStats->nLoadPercent = s_nLoadPermille / 10;
+
+	const u64 nNow = NowMicros ();
+	u64 nTotal = 0;
+	u64 Shares[8] = {};
+	for (unsigned i = 0; i < s_nLevels && i < 8; i++)
+	{
+		Shares[i] = s_nLevelMicros[i];
+		if (i == s_nLevel && s_nLevelSince != 0) Shares[i] += nNow - s_nLevelSince;
+		nTotal += Shares[i];
+	}
+	for (unsigned i = 0; i < s_nLevels && i < 8; i++)
+	{
+		pStats->nMHz[i] = static_cast<unsigned> (s_Levels[i].nHz / 1000000);
+		pStats->nPercentAt[i] = nTotal != 0 ? static_cast<unsigned> (Shares[i] * 100 / nTotal) : 0;
+	}
 }
