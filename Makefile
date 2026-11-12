@@ -97,6 +97,18 @@ TOOLCHAIN_DIR	?= $(CURDIR)/opt
 TOOLCHAIN_BIN := $(firstword $(wildcard $(TOOLCHAIN_DIR)/arm-gnu-toolchain-*/bin))
 ifneq ($(TOOLCHAIN_BIN),)
 export PATH := $(TOOLCHAIN_BIN):$(PATH)
+
+# ...and the tools by their full path, too.  An exported PATH reaches the
+# recipes, but GNU Make before 4.4 does not hand exported variables to $(shell)
+# (4.4's NEWS: "$(shell ...) now gets the exported variables").  Circle's
+# Rules.mk finds libgcc.a, libstdc++.a, libm.a, crtbegin.o and crtend.o with
+# $(shell $(CPP) -print-file-name=...): on Make 4.3 - Ubuntu 22.04 and 24.04 -
+# those came out empty unless the toolchain was also on the PATH of the shell
+# that ran make ("aarch64-none-elf-g++: No such file or directory").  The CI
+# put it there; a plain "make" did not.  `override`, because Circle's
+# Config.mk sets PREFIX without a path after this point.
+override PREFIX := $(TOOLCHAIN_BIN)/aarch64-none-elf-
+override PREFIX64 := $(TOOLCHAIN_BIN)/aarch64-none-elf-
 endif
 
 # ---------------------------------------------------------------------------

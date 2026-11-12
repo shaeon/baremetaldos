@@ -135,6 +135,13 @@ los cambios).  Pasos: [x] leer Salir actual  [x] diseño  [x] panel (boot.conf
   placa/DOS para aplicar" (s_nApplyPending); las acciones sin valor usan toda
   la fila para el nombre (CMenu::LabelWidth).
 
+**Punto 24 (Makefile con GNU Make 4.3) - HECHO ("make: the toolchain by its full path...").**  Causa:
+Make < 4.4 no pasa el PATH exportado a $(shell), y Circle (Rules.mk) busca
+libgcc.a, libstdc++.a, crtbegin.o... con $(shell $(CPP) -print-file-name).
+Arreglo: override PREFIX/PREFIX64 con la ruta completa de opt/ (Makefile).
+Comprobado: compila entero sin el toolchain en el PATH, kernel del mismo
+tamaño (6930312) que con él.
+
 ### Revisión completa del proyecto (pedida por el usuario, 12-nov)
 
 "Ahora que funciona y estamos afinando: revísalo y ve arreglando lo que veas;
