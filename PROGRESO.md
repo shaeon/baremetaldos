@@ -238,6 +238,17 @@ cuentas salen del metrónomo  [x] pruebas PC  [x] compilar  [x] commit + bundle 
   y el reinicio de DOS (ver la fila de Ctrl+Alt+Supr).
 - Llevar el trabajo a Miguel Ángel (mmoroca) como PR.
 
+## Entrega con parches (desde el 12-nov, a petición del usuario)
+
+En vez de bundle: `git format-patch --binary --stdout <su origin/main>..HEAD >
+baremetaldos-<hash>.patch`; el usuario: `git am --3way fichero.patch` y `git
+push origin main`.  Conserva autor, fecha y mensaje, pero los HASHES CAMBIAN
+(el committer es él).  Por eso, al empezar cada entrega: `git fetch origin`
+(en /tmp/chk) y, si su árbol es idéntico al mío, alinear mi main con el suyo
+(`git reset --hard origin/main` tras comprobar `git diff` vacío) para que los
+hashes de PROGRESO, del sello BMDOS_COMMIT y de las bases coincidan.  El sello
+del kernel que entrego lleva MI hash; el de GitHub Actions, el suyo.
+
 ## Hoja de ruta de rendimiento (12-nov, pendiente de que el usuario elija)
 
 A. Governor: A1 ver qué hace (datos en Rendimiento), A2 subir antes (huecos de
