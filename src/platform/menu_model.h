@@ -673,6 +673,17 @@ private:
 		return nFirst + BodyRows > n ? n - BodyRows : nFirst;
 	}
 
+public:
+	/// The room for an item's name: up to the value column - or, for an
+	/// action with no value ("Guardar y reiniciar la placa"), the whole row
+	/// up to the R/B column, as nothing else is drawn there.
+	static unsigned LabelWidth (const TItem &Item)
+	{
+		const bool bWide = Item.Kind == TKind::Action && Item.Value.empty ();
+		return (bWide ? ApplyCol : ValueCol) - LabelCol - 1;
+	}
+
+private:
 	static const char *ApplyMark (TApply Apply)
 	{
 		return Apply == TApply::RestartDOSBox ? "R" : Apply == TApply::RestartBoard ? "B" : "";
@@ -713,7 +724,7 @@ private:
 			const std::uint8_t nFg = bSelected ? White : Black;
 			const std::uint8_t nBg = bSelected ? Blue : LightGrey;
 			if (bSelected) S.Fill (LabelCol - 1, y, ApplyCol - LabelCol + 2, 1, nFg, nBg);
-			S.Put (LabelCol, y, Item.Label, nFg, nBg, nLabelW);
+			S.Put (LabelCol, y, Item.Label, nFg, nBg, LabelWidth (Item));
 
 			std::string Value = Item.Kind == TKind::Choice && Item.nChoice < Item.Choices.size ()
 					    ? "[" + Item.Choices[Item.nChoice] + "]" : Item.Value;

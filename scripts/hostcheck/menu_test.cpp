@@ -201,6 +201,20 @@ int main (void)
 		Check (S2.Selected () == 0, "on a page that fits, information lines are still skipped");
 	}
 
+	std::printf ("long action names\n");
+	{
+		CMenu L;
+		TPage P; P.Title = "Salir";
+		P.Items = { Action ("Guardar y reiniciar la placa", 1), Planned ("Actualizar desde GitHub") };
+		L.Pages = { P }; L.Refresh ();
+		CScreen T; L.Render (T);
+		Check (Contains (T.RowText (CMenu::BodyTop), "Guardar y reiniciar la placa"),
+		       "an action with no value is DRAWN whole, across the value column");
+		Check (Contains (T.RowText (CMenu::BodyTop + 1), "Actualizar desde GitHub")
+		       && T.At (CMenu::ValueCol, CMenu::BodyTop + 1).nChar == 'p',
+		       "a planned option keeps its name to its column, its value in its own");
+	}
+
 	std::printf ("scrolling and wrapping\n");
 	{
 		CMenu L;

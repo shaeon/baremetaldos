@@ -196,6 +196,10 @@ struct TBootConfig
 	// starts), 0-5; 0 = no wait (Win+F12 still opens it later).
 	unsigned nSetupWait;
 
+	// The status panel (PetSis) shown from the boot on, or hidden (the
+	// default); PetSis still toggles it for the session.
+	bool bPanel;
+
 	// DOS's time zone, as a POSIX TZ rule (newlib's TZ): "UTC0", or with
 	// daylight saving, "CET-1CEST,M3.5.0,M10.5.0/3" for peninsular Spain.
 	char TimeZone[64];
@@ -280,6 +284,7 @@ void ReadBootConfig (TBootConfig *pConfig)
 	pConfig->nMidiVolume = 100;
 	pConfig->nMouseSpeed = 100;
 	pConfig->nSetupWait = 2;
+	pConfig->bPanel = false;
 	strcpy (pConfig->TimeZone, "UTC0");
 	pConfig->bWebServer = false;
 	pConfig->WebPassword[0] = '\0';
@@ -504,6 +509,17 @@ void ReadBootConfig (TBootConfig *pConfig)
 			}
 			if (bOk) strcpy (pConfig->TimeZone, pValue);
 			else BootConfigWarn (pConfig, "boot.conf: timezone \"%s\" is not a POSIX TZ rule", pValue);
+		}
+		else if (strcmp (pKey, "panel") == 0)
+		{
+			if (strcmp (pValue, "on") == 0 || strcmp (pValue, "off") == 0)
+			{
+				pConfig->bPanel = strcmp (pValue, "on") == 0;
+			}
+			else
+			{
+				BootConfigWarn (pConfig, "boot.conf: unknown panel \"%s\" (on|off)", pValue);
+			}
 		}
 		else if (strcmp (pKey, "setup_wait") == 0)
 		{

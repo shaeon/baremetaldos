@@ -98,7 +98,9 @@ enum TActionId
 	ActShutdown,
 	ActReboot,
 	ActSave,
-	ActSaveRestart,
+	ActSaveRestart,			// "Guardar y reiniciar la placa"
+	ActSaveStay,			// "Guardar": and stay in the menu
+	ActDiscardStay,			// "Deshacer los cambios": and stay
 	ActRestartDos,
 	ActDiscard,
 	ActDefaults,
@@ -157,6 +159,16 @@ bool s_bOpenedAtBoot = false;
 // restart ran right after the boot: a second DOSBox start for nothing.
 bool s_bBeforeDos = false;
 
+// Saved but not applied yet: what "Guardar" (staying in the menu) left to do.
+// The title says so until it is done: 1 = restart DOS, 2 = restart the board
+// (which applies the R settings too).  A board restart clears it by itself; a
+// DOS restart clears the DOS level (BareMenuOnDosRestart).
+unsigned s_nApplyPending = 0;
+
+// What to do once the "changes not saved" question is answered, before a
+// restart or a shutdown (DlgUnsavedThen).
+int s_nThenAction = 0;
+
 std::string s_FloppyImage;		// what this menu put in A: / D:, for display
 std::string s_CDImage;
 
@@ -189,6 +201,8 @@ enum TDialogId
 	DlgRestartDos,		// after saving R settings: Reiniciar DOS ahora / Más tarde
 	DlgSaveFailed,		// Aceptar
 	DlgInfo,		// Aceptar, nothing to do after it
+	DlgUnsavedThen,		// changes, before restarting / shutting down:
+				// Guardar y seguir / Sin guardar / Cancelar
 	InWiFiPassword = 50,	// text input: the password of s_WiFiSSID
 	InWiFiSSID,		// text input: a network's name, typed
 	InWebPassword,		// text input: the web server's password
@@ -269,6 +283,7 @@ enum TSettingId
 	SetVideoCore,
 	SetVsync,
 	SetScaler,
+	SetPanel,
 
 	SetMachine = 200,
 	SetMemSize,
@@ -326,6 +341,11 @@ std::string s_NetCurrentChoice;		// the choice's value ("a.b.c.d/n"), "" if none
 void LiveScaler (const std::string &Value)
 {
 	BareVideoSetSharpScaling (Value == "sharp" ? TRUE : FALSE);
+}
+
+void LivePanel (const std::string &Value)
+{
+	BareVideoFooterSetVisible (Value == "on" ? TRUE : FALSE);
 }
 
 } // namespace
@@ -469,6 +489,12 @@ void DefineSettings (void)
 		"se interpola de las dos más cercanas. Se ve al momento, en este mismo menú.",
 		TApply::Now,
 		{ { "Nítido", "sharp" }, { "Suave", "smooth" } }, 0, LiveScaler });
+
+	s_Settings.push_back ({ SetPanel, FileBoot, "", "panel", "Panel de estado",
+		"La línea de abajo con el reloj, la temperatura, el ritmo y el sonido. Se ve "
+		"al momento y se guarda en boot.conf para el próximo arranque. PetSis la "
+		"enseña o la esconde solo hasta apagar.",
+		TApply::Now, { { "Oculto", "off" }, { "Visible", "on" } }, 0, LivePanel });
 
 	// --- Máquina: dosbox.conf -----------------------------------------------
 
@@ -1486,31 +1512,48 @@ TPage PageSalir (void)
 {
 	TPage P;
 	P.Title = "Salir";
-	P.Help = "Volver al juego, o apagar y reiniciar con seguridad.";
+	P.Help = "Guardar los cambios, volver al juego, reiniciar o apagar.";
+
+	// What a restart would apply, said in the help of the options that save.
+	const bool bBoard = ModifiedNeedsBoard () || s_nApplyPending == 2;
+	const bool bDos = (ModifiedNeedsDos () || s_nApplyPending == 1) && !s_bBeforeDos;
+	const std::string Applies = bBoard ? " Hay ajustes que se aplican al reiniciar la placa (B)."
+				  : bDos ? " Hay ajustes que se aplican al reiniciar DOS (R)." : "";
+
 	P.Items =
 	{
+		Section ("Guardar"),
+		Action ("Guardar", ActSaveStay,
+			"Guarda los cambios en boot.conf, dosbox.conf y cmdline.txt (solo las "
+			"líneas que cambian; los comentarios se conservan) y sigues en el menú."
+			+ Applies),
+		Action ("Guardar y volver al juego", ActSave,
+			"Guarda y vuelve a DOS. Igual que F10." + Applies),
+		Action ("Guardar y reiniciar la placa", ActSaveRestart,
+			"Guarda y reinicia la Raspberry Pi: así se aplica todo lo guardado, lo "
+			"marcado R y lo marcado B."),
+
+		Section ("Sin guardar"),
 		Action ("Volver al juego", ActResume,
-			"Cierra el menú y DOS sigue donde estaba. También con Esc."),
-		Action ("Apagado seguro", ActShutdown,
-			"Vacía la tarjeta y detiene la placa, como Ctrl+F9. Espera al mensaje "
-			"antes de quitar la corriente."),
-		Action ("Reiniciar DOS", ActRestartDos,
-			"Como Ctrl+Alt+Supr en MS-DOS: DOS empieza de nuevo (dosbox.conf y su "
-			"autoexec otra vez) en unos segundos, sin reiniciar la placa. Los cambios "
-			"sin guardar del menú se descartan."),
-		Action ("Reiniciar la placa", ActReboot,
-			"Reinicia la Raspberry Pi, como Ctrl+Alt+PetSis."),
-		Section (""),
-		Action ("Guardar y volver", ActSave,
-			"Guarda los cambios en boot.conf, dosbox.conf y cmdline.txt (solo las líneas "
-			"que cambian; los comentarios se conservan) y vuelve al juego. Igual que F10."),
-		Action ("Guardar y reiniciar", ActSaveRestart,
-			"Guarda y reinicia: DOS si los cambios son R, la placa si alguno es B."),
-		Action ("Salir sin guardar", ActDiscard,
-			"Descarta los cambios hechos en el menú, deshace los que se aplicaron al "
-			"momento y vuelve al juego."),
+			"Cierra el menú y DOS sigue donde estaba. Si hay cambios sin guardar, "
+			"pregunta qué hacer con ellos. También con Esc."),
+		Action ("Deshacer los cambios", ActDiscardStay,
+			"Vuelve a lo que hay guardado (y deshace lo que se aplicó al momento, "
+			"como el volumen) y sigues en el menú."),
 		Action ("Valores por defecto", ActDefaults,
 			"Pone los valores de fábrica en el menú (F9). No se guardan hasta que guardes."),
+
+		Section ("Reiniciar y apagar"),
+		Action ("Reiniciar DOS", ActRestartDos,
+			"Como Ctrl+Alt+Supr en MS-DOS: DOS empieza de nuevo (dosbox.conf y su "
+			"autoexec otra vez) en unos segundos, sin reiniciar la placa. Si hay "
+			"cambios sin guardar, pregunta antes."),
+		Action ("Reiniciar la placa", ActReboot,
+			"Reinicia la Raspberry Pi, como Ctrl+Alt+PetSis. Si hay cambios sin "
+			"guardar, pregunta antes."),
+		Action ("Apagado seguro", ActShutdown,
+			"Vacía la tarjeta y detiene la placa, como Ctrl+F9. Espera al mensaje "
+			"antes de quitar la corriente. Si hay cambios sin guardar, pregunta antes."),
 		Planned ("Actualizar desde GitHub", "Buscará una versión nueva en las releases."),
 	};
 	return P;
@@ -1903,7 +1946,7 @@ void BuildPages (void)
 			SettingItem (*FindSetting (SetVsync)),
 			SettingItem (*FindSetting (SetScaler)),
 			Planned ("Corrección de aspecto", "Llegará en un paso próximo del menú."),
-			Planned ("Panel de estado", "Llegará en un paso próximo del menú."),
+			SettingItem (*FindSetting (SetPanel)),
 		};
 		Pages.push_back (P);
 	}
@@ -2217,7 +2260,12 @@ void AskToLeave (void)
 			   { "Guardar", "Descartar", "Seguir aquí" });
 }
 
-void SaveAndLeave (bool bRestart)
+enum class TAfterSave { Stay, Leave, RebootBoard };
+
+// Save every change, then stay in the menu, go back to the game, or restart the
+// board.  What the saved changes still need to take effect is remembered
+// (s_nApplyPending) and shown in the title until it is done.
+void Save (TAfterSave After)
 {
 	const bool bBoard = ModifiedNeedsBoard ();
 	const bool bDos = ModifiedNeedsDos () && !s_bBeforeDos;
@@ -2229,44 +2277,88 @@ void SaveAndLeave (bool bRestart)
 				   { "Aceptar" });
 		return;
 	}
+	const unsigned nNeeds = bBoard ? 2 : bDos ? 1 : 0;
+	if (nNeeds > s_nApplyPending) s_nApplyPending = nNeeds;
 
-	// "Guardar y reiniciar": the board if a B setting changed, otherwise DOS.
-	if (bRestart)
+	switch (After)
 	{
-		if (bBoard)
+	case TAfterSave::RebootBoard:
+		BareCoreRequestReboot ();
+		return;
+
+	case TAfterSave::Stay:
+		if (s_nApplyPending == 2)
 		{
-			BareCoreRequestReboot ();
+			s_Menu.OpenDialog (DlgInfo, "Guardado",
+					   "Hay ajustes que se aplican al reiniciar la placa (B). Hazlo cuando "
+					   "quieras: Salir, Guardar y reiniciar la placa.", { "Aceptar" });
+		}
+		else if (s_nApplyPending == 1)
+		{
+			s_Menu.OpenDialog (DlgInfo, "Guardado",
+					   "Hay ajustes que se aplican al reiniciar DOS (R). Hazlo cuando "
+					   "quieras: Salir, Reiniciar DOS (o Ctrl+Alt+Supr).", { "Aceptar" });
+		}
+		return;
+
+	case TAfterSave::Leave:
+		if (s_nApplyPending == 2)
+		{
+			s_Menu.OpenDialog (DlgRestartNow, "Reinicio necesario",
+					   "Guardado. Hay ajustes que se aplican al reiniciar la placa.",
+					   { "Reiniciar la placa", "Más tarde" });
+			return;
+		}
+		if (s_nApplyPending == 1)
+		{
+			s_Menu.OpenDialog (DlgRestartDos, "Reiniciar DOS",
+					   "Guardado. Los ajustes marcados R se aplican al reiniciar DOS (unos "
+					   "segundos; la placa sigue encendida). Lo que haya en marcha en DOS se "
+					   "pierde.",
+					   { "Reiniciar DOS ahora", "Más tarde" });
 			return;
 		}
 		Close ();
-		if (!s_bBeforeDos)
+		return;
+	}
+}
+
+// Restart DOS, restart the board, or shut down - once any unsaved change has
+// been saved or dropped, as the user chose.
+void DoThen (int nAction)
+{
+	switch (nAction)
+	{
+	case ActRestartDos:
+		Close ();
+		if (!s_bBeforeDos)		// at boot DOS starts in a moment anyway
 		{
 			BareCoreRequestDosRestart ();
 		}
-		return;
+		break;
+	case ActReboot:
+		BareCoreRequestReboot ();
+		break;
+	case ActShutdown:
+		Close ();
+		BareCoreRequestShutdown ();
+		break;
+	default:
+		break;
 	}
+}
 
-	if (bBoard)
+void AskThen (int nAction)
+{
+	if (!AnyModified ())
 	{
-		s_Menu.OpenDialog (DlgRestartNow, "Reinicio necesario",
-				   bDos ? "Guardado. Hay ajustes marcados B: se aplican, con los R, al "
-					  "reiniciar la placa."
-					: "Guardado. Los ajustes marcados B se aplican al reiniciar la placa.",
-				   { "Reiniciar la placa", "Más tarde" });
+		DoThen (nAction);
 		return;
 	}
-
-	if (bDos)
-	{
-		s_Menu.OpenDialog (DlgRestartDos, "Reiniciar DOS",
-				   "Guardado. Los ajustes marcados R se aplican al reiniciar DOS (unos "
-				   "segundos; la placa sigue encendida). Lo que haya en marcha en DOS se "
-				   "pierde.",
-				   { "Reiniciar DOS ahora", "Más tarde" });
-		return;
-	}
-
-	Close ();
+	s_nThenAction = nAction;
+	s_Menu.OpenDialog (DlgUnsavedThen, "Cambios sin guardar",
+			   "Antes de seguir: ¿qué hacemos con los cambios que no has guardado?",
+			   { "Guardarlos", "Descartarlos", "Cancelar" });
 }
 
 constexpr unsigned PageIndexUnidades = 2;	// Sistema, Máquina, Unidades, ...
@@ -2480,7 +2572,7 @@ void HandleEvent (const TEvent &Ev)
 		break;
 
 	case TEventKind::SaveAndExit:
-		SaveAndLeave (false);
+		Save (TAfterSave::Leave);
 		break;
 
 	case TEventKind::Defaults:
@@ -2500,8 +2592,10 @@ void HandleEvent (const TEvent &Ev)
 		switch (Ev.nId)
 		{
 		case ActResume:		AskToLeave (); break;
-		case ActSave:		SaveAndLeave (false); break;
-		case ActSaveRestart:	SaveAndLeave (true); break;
+		case ActSave:		Save (TAfterSave::Leave); break;
+		case ActSaveStay:	Save (TAfterSave::Stay); break;
+		case ActSaveRestart:	Save (TAfterSave::RebootBoard); break;
+		case ActDiscardStay:	Discard (); break;
 		case ActDiscard:	Discard (); Close (); break;
 		case ActDefaults:	{ TEvent Defaults; Defaults.Kind = TEventKind::Defaults; HandleEvent (Defaults); } break;
 		case ActDriveC:
@@ -2559,22 +2653,11 @@ void HandleEvent (const TEvent &Ev)
 			}
 			break;
 		case ActShutdown:
-			// Changes not saved are dropped, as a power-off without saving
-			// would; the shutdown itself is what was asked for.
-			Discard ();
-			Close ();
-			BareCoreRequestShutdown ();
-			break;
 		case ActReboot:
-			BareCoreRequestReboot ();
-			break;
 		case ActRestartDos:
-			Discard ();
-			Close ();
-			if (!s_bBeforeDos)		// at boot DOS starts in a moment anyway
-			{
-				BareCoreRequestDosRestart ();
-			}
+			// Unsaved changes used to be dropped (DOS restart, shutdown) or
+			// lost without a word (board restart): ask first.
+			AskThen (Ev.nId);
 			break;
 		default:
 			break;
@@ -2584,8 +2667,26 @@ void HandleEvent (const TEvent &Ev)
 	case TEventKind::Dialog:
 		if (Ev.nId == DlgUnsaved && !Ev.bCancelled)
 		{
-			if (Ev.nChoice == 0) SaveAndLeave (false);
+			if (Ev.nChoice == 0) Save (TAfterSave::Leave);
 			else if (Ev.nChoice == 1) { Discard (); Close (); }
+		}
+		else if (Ev.nId == DlgUnsavedThen && !Ev.bCancelled && Ev.nChoice != 2)
+		{
+			if (Ev.nChoice == 0)
+			{
+				if (!SaveSettings ())
+				{
+					s_Menu.OpenDialog (DlgSaveFailed, "No se pudo guardar",
+							   "No se pudo escribir algún fichero en la tarjeta. No se "
+							   "ha reiniciado nada.", { "Aceptar" });
+					break;
+				}
+			}
+			else
+			{
+				Discard ();
+			}
+			DoThen (s_nThenAction);
 		}
 		else if (Ev.nId == DlgDefaults && !Ev.bCancelled && Ev.nChoice == 0)
 		{
@@ -2610,7 +2711,10 @@ void HandleEvent (const TEvent &Ev)
 
 void UpdateTitle (void)
 {
-	s_Menu.Texts.Title = AnyModified () ? "BM-DOS Setup   * cambios sin guardar" : "BM-DOS Setup";
+	s_Menu.Texts.Title = AnyModified () ? "BM-DOS Setup   * cambios sin guardar"
+			   : s_nApplyPending == 2 ? "BM-DOS Setup   * reinicia la placa para aplicar"
+			   : s_nApplyPending == 1 ? "BM-DOS Setup   * reinicia DOS para aplicar"
+			   : "BM-DOS Setup";
 }
 
 void Press (TKey Key)
@@ -2928,4 +3032,10 @@ void BareMenuOnDosRestart (void)
 	// showing their names.
 	s_FloppyImage.clear ();
 	s_CDImage.clear ();
+
+	// What a DOS restart was needed for is done; a board restart still is.
+	if (s_nApplyPending == 1)
+	{
+		s_nApplyPending = 0;
+	}
 }

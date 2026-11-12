@@ -123,6 +123,18 @@ Nueva carpeta, zona de arrastre); fuera la sección de contraseña, su JS, la
 ruta /password y SavePassword.  La contraseña se pone en el menú o boot.conf.
 IDEA PARA MÁS ADELANTE: página de configuración web.
 
+**Punto 20 (panel de estado desde el menú) + rehacer la pestaña Salir -
+HECHO, pendiente de probar en placa.**  El usuario: Salir "queda un poco raro"; quiere
+"guardar y seguir en la BIOS" y "guardar y reiniciar la placa" (para aplicar
+los cambios).  Pasos: [x] leer Salir actual  [x] diseño  [x] panel (boot.conf
++ Vídeo)  [x] Salir  [x] pruebas PC  [x] compilar  [x] commit + bundle ("menu: Salir rebuilt...").
+  Hecho: boot.conf panel (+2 casos), "Panel de estado" en Vídeo (al momento);
+  Salir en tres grupos (Guardar / Sin guardar / Reiniciar y apagar), Guardar y
+  seguir, Guardar y reiniciar la placa, Deshacer los cambios; reiniciar DOS,
+  la placa o apagar preguntan si hay cambios; el título recuerda "reinicia la
+  placa/DOS para aplicar" (s_nApplyPending); las acciones sin valor usan toda
+  la fila para el nombre (CMenu::LabelWidth).
+
 ### Revisión completa del proyecto (pedida por el usuario, 12-nov)
 
 "Ahora que funciona y estamos afinando: revísalo y ve arreglando lo que veas;

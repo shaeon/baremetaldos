@@ -55,6 +55,7 @@ void BareVideoPresenterStats (TBareVideoPresenterStats *p) { std::memset (p, 0, 
 void BareVideoRestoreScreen (void) {}
 void BareVideoSaveScreen (void) {}
 void BareVideoSetSharpScaling (boolean) {}
+void BareVideoFooterSetVisible (boolean) {}
 boolean BareVideoSharpScaling (void) { return TRUE; }
 boolean BareWebRunning (void) { return TRUE; }
 static CLogger s_Logger;

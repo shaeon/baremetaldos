@@ -499,6 +499,7 @@ boolean CKernel::Initialize (void)
 	BareAudioSetVolume (Config.nVolume);
 	BareMidiSetVolume (Config.nMidiVolume);
 	BareInputSetMouseSpeed (Config.nMouseSpeed);
+	BareVideoFooterSetVisible (Config.bPanel ? TRUE : FALSE);	// boot.conf panel
 	if (!BareAudioInit (MixerRate, &mInterrupt))
 	{
 		Report ("FAIL: cannot initialise audio");

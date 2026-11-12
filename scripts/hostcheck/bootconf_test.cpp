@@ -176,6 +176,8 @@ static const TAudioCase AudioCases[] =
 	{ "raton: velocidad 200", "mouse_speed = 200\n", false, 100, 100, nullptr },
 	{ "raton: velocidad fuera de rango", "mouse_speed = 1000\n", false, 100, 100, "mouse_speed" },
 	{ "setup: sin espera", "setup_wait = 0\n", false, 100, 100, nullptr },
+	{ "panel: visible", "panel = on\n", false, 100, 100, nullptr },
+	{ "panel: valor raro", "panel = si\n", false, 100, 100, "panel" },
 	{ "setup: espera fuera de rango", "setup_wait = 9\n", false, 100, 100, "setup_wait" },
 	{ "hora: zona de Espana", "timezone = CET-1CEST,M3.5.0,M10.5.0/3\n", false, 100, 100, nullptr },
 	{ "hora: zona con nombre entre <>", "timezone = <-03>3\n", false, 100, 100, nullptr },
@@ -319,6 +321,7 @@ int main (void)
 		Check (Config.nMidiVolume == Case.nMidi, Case.pName, "midi_volume");
 		Check (Config.nMouseSpeed == (strstr (Case.pContents, "mouse_speed = 200") ? 200u : 100u), Case.pName, "mouse_speed");
 		Check (Config.nSetupWait == (strstr (Case.pContents, "setup_wait = 0") ? 0u : 2u), Case.pName, "setup_wait");
+		Check (Config.bPanel == (strstr (Case.pContents, "panel = on") != nullptr), Case.pName, "panel");
 		Check (Config.bWebServer == (strstr (Case.pContents, "web_server = on") != nullptr), Case.pName, "web_server");
 		Check (strcmp (Config.WebPassword, strstr (Case.pContents, "web_password = s3cr3t!") ? "s3cr3t!" : "") == 0,
 		       Case.pName, "web_password");

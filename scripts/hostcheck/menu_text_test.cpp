@@ -47,7 +47,6 @@ int main ()
 		std::printf ("  NO CABE  %-40s %3u/%-3u  %s\n", Where.c_str (), n, nMax, What.c_str ());
 		nBad++;
 	};
-	const unsigned nLabelW = CMenu::ValueCol - CMenu::LabelCol - 1;
 	const unsigned nValueW = CMenu::ApplyCol - CMenu::ValueCol - 1;
 	const unsigned nSectionW = CMenu::HelpCol - 2 - CMenu::LabelCol;
 	const unsigned nHelpW = Cols - CMenu::HelpCol - 2;
@@ -68,7 +67,8 @@ int main ()
 				if (CScreen::Length (I.Label) > nSectionW) Report (W, "sección", CScreen::Length (I.Label), nSectionW);
 				continue;
 			}
-			if (CScreen::Length (I.Label) > nLabelW) Report (W, "nombre", CScreen::Length (I.Label), nLabelW);
+			if (CScreen::Length (I.Label) > CMenu::LabelWidth (I))
+				Report (W, "nombre", CScreen::Length (I.Label), CMenu::LabelWidth (I));
 			if (I.Kind == TKind::Choice)
 				for (const std::string &C : I.Choices)
 				{
