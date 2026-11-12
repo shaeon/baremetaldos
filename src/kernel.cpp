@@ -197,6 +197,14 @@ void CKernel::Cleanup (void)
 
 // Defined by the Makefile (APP_DEFINES).  The fallback keeps a stale object
 // file from breaking a build that was configured without it.
+// The commit this kernel was built from (Makefile, build/bmdos_version.h).
+#if __has_include("../build/bmdos_version.h")
+#include "../build/bmdos_version.h"
+#endif
+#ifndef BMDOS_COMMIT
+#define BMDOS_COMMIT "sin-git"
+#endif
+
 #ifndef DOSBOX_SNAPSHOT
 #define DOSBOX_SNAPSHOT "unknown"
 #endif
@@ -455,12 +463,12 @@ boolean CKernel::Initialize (void)
 	// The boot logo, like a PC BIOS's: at the top with the full boot log, in
 	// the middle of the screen with a quiet one (boot_log = quiet | off).
 	static char LogoCaption[80];
-	snprintf (LogoCaption, sizeof LogoCaption, "BM-DOS %s  -  DOSBox on baremetal Raspberry Pi",
-		  DOSBOX_SNAPSHOT);
+	snprintf (LogoCaption, sizeof LogoCaption, "BM-DOS %s (%s)  -  DOSBox on baremetal Raspberry Pi",
+		  DOSBOX_SNAPSHOT, BMDOS_COMMIT);
 	BareVideoSetBootLogo (m_nBootLogLevel < 2 ? TRUE : FALSE, LogoCaption);
 
 	BareVideoStatusReset ();
-	Report ("BM-DOS %s - DOSBox on baremetal Raspberry Pi", DOSBOX_SNAPSHOT);
+	Report ("BM-DOS %s (%s) - DOSBox on baremetal Raspberry Pi", DOSBOX_SNAPSHOT, BMDOS_COMMIT);
 	Report ("by @mmoroca & arena.ai 2026");
 	Report ("Display %ux%u", Config.nWidth, Config.nHeight);
 
@@ -1300,7 +1308,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		if (BareMenuActive ())
 		{
 			BareMenuTick ();
-			CTimer::SimpleMsDelay (15);
+			CScheduler::Get ()->MsSleep (15);	// the network's tasks run meanwhile
 
 			nRefStart = BareMicros ();
 			BareSysInfoGovernorResumed ();	// audio gaps right after this are not load
@@ -1312,7 +1320,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 
 		if (BareCorePaused ())
 		{
-			CTimer::SimpleMsDelay (20);
+			CScheduler::Get ()->MsSleep (20);	// not a spin: the network keeps going
 
 			// Re-anchor the pacer on resume: the machine did not run
 			// during the pause, so the frame index must not bill it for

@@ -533,11 +533,21 @@ auto switchThread (const ThreadSwitchReason reason) -> ThreadSwitchReason
 		const u64 nWait = barepace::Wait (s_Pacer, BareMicros (), nPeriod);
 		if (nWait >= 1000)
 		{
-			// Below 1 ms there is nothing worth the call: SimpleusDelay()
-			// polls a register and would spend more time entering than
-			// waiting.  (The schedule still advances: the next boundary is
-			// due one period after this one's due time.)
-			CTimer::SimpleusDelay (static_cast<unsigned> (nWait));
+			// The wait GIVES the CPU away: Circle's network stack, WLAN
+			// driver, wpa_supplicant, DHCP and the web server are scheduler
+			// tasks, and they only run when a task yields.  This used to spin
+			// in SimpleusDelay - half of every second on a comfortable game
+			// (the profiler on the board: "Esperando 51 %") - and the WiFi
+			// took far too long to get an address.  Yield until the due time;
+			// the other side (the frame loop, above) sees no report yet and
+			// yields back.  Below 1 ms there is nothing worth it.  (The
+			// schedule still advances: the next boundary is due one period
+			// after this one's due time, whatever the overshoot.)
+			const u64 nUntil = BareMicros () + nWait;
+			while (BareMicros () < nUntil)
+			{
+				CScheduler::Get ()->Yield ();
+			}
 			s_nPaceWaitMicros += nWait;
 		}
 	}

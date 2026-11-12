@@ -115,6 +115,7 @@ public:
 	void Yield (void);
 	CTask *GetCurrentTask (void);
 	void Sleep (unsigned nSeconds);
+	void MsSleep (unsigned nMilliSeconds);
 };
 EOF
 

@@ -41,6 +41,19 @@
 PROJECT_SNAPSHOT ?= 2026-11-10.78
 PROJECT_SNAPSHOT_DATE ?= 2026-11-10
 
+# Which commit the kernel was built from.  PROJECT_SNAPSHOT above is bumped by
+# hand and stays the same across many commits, so "2026-11-10.78" on screen
+# could not tell two kernels apart.  The short commit (with "+" for a tree
+# with uncommitted changes).  It goes into a generated
+# header that is rewritten only when it changes, so that the sources showing
+# it are rebuilt then - and only then.
+BMDOS_COMMIT := $(shell c=$$(git -C $(CURDIR) rev-parse --short=7 HEAD 2>/dev/null) && { git -C $(CURDIR) diff --quiet HEAD 2>/dev/null && echo $$c || echo $$c+; } || echo sin-git)
+$(shell mkdir -p $(CURDIR)/build && \
+	printf '#define BMDOS_COMMIT "%s"\n#define BMDOS_SNAPSHOT "%s"\n' '$(BMDOS_COMMIT)' '$(PROJECT_SNAPSHOT)' \
+		> $(CURDIR)/build/bmdos_version.h.tmp && \
+	(cmp -s $(CURDIR)/build/bmdos_version.h.tmp $(CURDIR)/build/bmdos_version.h \
+	 || mv $(CURDIR)/build/bmdos_version.h.tmp $(CURDIR)/build/bmdos_version.h))
+
 # Raspberry Pi model: 3, 4 or 5.  4 is the default because it is the sweet
 # spot for this emulator (AArch64, fast enough for the interpreter core).
 RASPPI		?= 4

@@ -89,6 +89,16 @@ exactamente (letras que tardan / repetición al mantener / menú).  Con el
 arreglo de teclas repetidas, mantener una tecla ya repite como un PC (DOSBox:
 500 ms de espera, luego ~30/s) y no a ráfagas como antes.
 
+**WiFi muy lento en coger IP (usuario, 12-nov).**  Causa: la red, el WLAN,
+wpa_supplicant y el DHCP son tareas del planificador y solo corren cuando
+alguien cede la CPU; el metrónomo esperaba girando (SimpleusDelay) - la
+mitad de cada segundo en un juego holgado - y el menú y la pausa también
+(SimpleMsDelay).  Arreglo: esperas que ceden la CPU (Yield / MsSleep).
+Además: la versión mostrada ("2026-11-10.78") es el sello manual del
+proyecto, igual en todos los kernels; ahora se añade el commit
+(build/bmdos_version.h, generado por el Makefile).  Hecho y entregado
+("net: wait by yielding...").  Falta: probar en placa cuánto tarda la IP.
+
 ### Revisión completa del proyecto (pedida por el usuario, 12-nov)
 
 "Ahora que funciona y estamos afinando: revísalo y ve arreglando lo que veas;

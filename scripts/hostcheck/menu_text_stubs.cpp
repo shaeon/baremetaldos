@@ -68,6 +68,7 @@ bool CPU_CycleAutoAdjust = false;
 static CScheduler s_Sched;
 CScheduler *CScheduler::Get (void) { return &s_Sched; }
 void CScheduler::Yield (void) {}
+void CScheduler::MsSleep (unsigned) {}
 void CTimer::SimpleMsDelay (unsigned) {}
 const TFont Font8x16 = { 8, 16, 0, 0x21, 0xFF, nullptr };
 

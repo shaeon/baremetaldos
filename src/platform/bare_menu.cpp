@@ -45,6 +45,14 @@
 
 #include "libretro.h"
 
+// The commit this kernel was built from (Makefile, build/bmdos_version.h).
+#if __has_include("../../build/bmdos_version.h")
+#include "../../build/bmdos_version.h"
+#endif
+#ifndef BMDOS_COMMIT
+#define BMDOS_COMMIT "sin-git"
+#endif
+
 #ifndef DOSBOX_SNAPSHOT
 #define DOSBOX_SNAPSHOT "dev"
 #endif
@@ -1427,7 +1435,11 @@ TPage PageSistema (void)
 	P.Items =
 	{
 		Section ("BM-DOS"),
-		Info ("Versión", DOSBOX_SNAPSHOT),
+		Info ("Versión", BMDOS_COMMIT,
+		      "El commit de git del que salió este kernel: lo que distingue un kernel "
+		      "de otro.  La instantánea es el sello de versión del proyecto, que se "
+		      "cambia a mano."),
+		Info ("Instantánea", DOSBOX_SNAPSHOT),
 		Info ("Emulador", "DOSBox-core (libretro)"),
 		Info ("Encendido desde hace", Format ("%llu:%02llu:%02llu",
 			(unsigned long long) (nSeconds / 3600),
@@ -2137,7 +2149,7 @@ void BuildPages (void)
 void SetupTexts (void)
 {
 	s_Menu.Texts.Title = "BM-DOS Setup";
-	s_Menu.Texts.Version = DOSBOX_SNAPSHOT;
+	s_Menu.Texts.Version = BMDOS_COMMIT;
 	// ASCII and Latin-1 only: the font has no arrow glyphs (CP437's are
 	// below 0x20 and Circle's table starts at 0x21).
 	s_Menu.Texts.KeysLine1 = "Arriba/Abajo: elegir   Izq/Der: pestaña   Intro +/-: cambiar   Esc: al juego";
@@ -2882,7 +2894,7 @@ boolean BareMenuBootWindow (unsigned nSeconds)
 		{
 			CScheduler::Get ()->Yield ();
 		}
-		CTimer::SimpleMsDelay (15);
+		CScheduler::Get ()->MsSleep (15);	// the WiFi and DHCP keep going
 	}
 
 	s_bBootWindow.store (false, std::memory_order_release);
