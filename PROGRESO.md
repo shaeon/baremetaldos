@@ -79,6 +79,16 @@ llamada y espera  [x] Rendimiento: "Dónde se va el tiempo"; páginas largas:
 el cursor recorre las líneas informativas (menu_model.h, prueba nueva)
 [x] pruebas PC  [x] compilar  [x] commit + bundle ("profile: where core 0's time goes...").
 
+**Captura del perfilador en placa (12-nov):** "Teclado y ratón 49 %, CPU x86 0 %,
+Esperando 51 %".  Error de medida: BareInputPoll termina con Yield(), que
+cede la CPU a la tarea del emulador; medirlo desde fuera cargaba toda la
+emulación al teclado.  Arreglado (se mide antes del Yield).  Lectura real:
+emulación ~49 %, esperando 51 %: holgura de sobra (Carga 51 %, "comf").
+El usuario dice que el teclado "está como lento": PREGUNTA pendiente de qué
+exactamente (letras que tardan / repetición al mantener / menú).  Con el
+arreglo de teclas repetidas, mantener una tecla ya repite como un PC (DOSBox:
+500 ms de espera, luego ~30/s) y no a ráfagas como antes.
+
 ### Revisión completa del proyecto (pedida por el usuario, 12-nov)
 
 "Ahora que funciona y estamos afinando: revísalo y ve arreglando lo que veas;

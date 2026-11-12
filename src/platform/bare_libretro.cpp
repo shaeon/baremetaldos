@@ -196,9 +196,11 @@ static void BareInputPollCallback (void)
 	// USB stack and cooperative scheduler need to be serviced from TASK_LEVEL;
 	// doing it here means it happens exactly once per frame, from the frame
 	// thread, which is where we want it.
-	const u64 nProfileStart = BareProfileClock ();
+	// The profiler's "Teclado y ratón" is timed inside BareInputPoll, before
+	// its Yield(): that Yield hands the CPU to the emulator task, which then
+	// runs DOSBox - and timing it from here billed the whole x86 CPU to the
+	// keyboard (the board, 12-nov: "Teclado y ratón 49 %, CPU x86 0 %").
 	BareInputPoll ();
-	BareProfileAdd (BareProfileInput, BareProfileClock () - nProfileStart);
 }
 
 static int16_t BareInputState (unsigned port, unsigned device, unsigned index,

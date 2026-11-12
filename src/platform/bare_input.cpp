@@ -716,6 +716,8 @@ void BareInputDeinit (void)
 
 void BareInputPoll (void)
 {
+	const u64 nProfileStart = BareProfileClock ();
+
 	// Late attach: USB enumeration runs in the background, so a keyboard
 	// plugged in after boot shows up here on the next frame.
 	if (s_pKeyboard == nullptr)
@@ -784,6 +786,10 @@ void BareInputPoll (void)
 	// scheduler is non-preemptive, so anything that loops for a long time has
 	// to yield explicitly.  Doing it once per frame is enough and costs
 	// nothing measurable.
+	// Only the input work counts as "Teclado y ratón": the Yield below runs
+	// the emulator (and the network's tasks), which is not input.
+	BareProfileAdd (BareProfileInput, BareProfileClock () - nProfileStart);
+
 	CScheduler::Get ()->Yield ();
 }
 
