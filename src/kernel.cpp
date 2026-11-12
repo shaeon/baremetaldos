@@ -66,6 +66,10 @@ static constexpr unsigned MixerRate = 44100;
 // DOS's PSP as last seen, and the shell's (the first one seen after DOS
 // starts), for the governor's warm-up on a program start (Run).
 static unsigned s_nLastPsp = 0;
+
+// DOS's clock has been set from a real time (NTP); while it has not, the frame
+// loop sets it as soon as the network's time arrives.
+static boolean s_bDosClockSet = FALSE;
 static unsigned s_nHomePsp = 0;
 
 CKernel::CKernel (void)
@@ -583,21 +587,17 @@ boolean CKernel::Initialize (void)
 		}
 	}
 
-	// --- the time, before DOSBox reads it ----------------------------------
-	// DOSBox sets DOS's clock once, when its BIOS starts; the board has no
-	// clock of its own, so with the network on, give NTP a few seconds - 5 at
-	// most: the network started before the SUPR window, so most of the wait
-	// has usually gone by already.
-	// With WiFi on (the default) but no network chosen yet, nothing will
-	// answer: no wait, on a card fresh out of make-sd or GitHub.
-	const boolean bExpectNet = Config.Network == TBootConfig::NetEthernet
-				   || (Config.Network == TBootConfig::NetWiFi && BareNetWiFiConfigured ());
-	if (bExpectNet)
+	// --- the time ------------------------------------------------------------
+	// DOSBox sets DOS's clock when its BIOS starts, and the board has no clock
+	// of its own.  The boot used to wait up to 5 s for NTP here, and on a WiFi
+	// that takes longer DOS still started in 1970 - every time (the board,
+	// 12-nov).  No wait now: if the network's time is not here yet, the frame
+	// loop sets DOS's clock as soon as it is (BareCoreSyncDosClock).
 	{
 		char Now[48];
-		const boolean bTime = BareNetWaitForTime (5000);
 		BareNetLocalTime (Now, sizeof Now);
-		Report ("hora: %s", bTime ? Now : "sin hora de red, DOS empieza en 1970");
+		s_bDosClockSet = BareNetTimeValid ();
+		Report ("hora: %s", s_bDosClockSet ? Now : "se pondrá en cuanto haya red");
 	}
 
 	// --- report what we found --------------------------------------------
@@ -1396,6 +1396,47 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		// rebooting the machine, the setup menu): here, between two frames,
 		// where DOSBox is parked at its frame boundary.  If loading it again
 		// fails, the board restarts instead.
+		// The network's time came after DOS started: set DOS's clock now,
+		// between two frames.  Checked once a second.
+		if (!s_bDosClockSet)
+		{
+			static u64 s_nClockCheckMicros = 0;
+			const u64 nNow = BareMicros ();
+			if (nNow - s_nClockCheckMicros >= 1000000)
+			{
+				s_nClockCheckMicros = nNow;
+				if (BareNetTimeValid ())
+				{
+					s_bDosClockSet = TRUE;
+					char Now[48];
+					BareNetLocalTime (Now, sizeof Now);
+					CLogger::Get ()->Write (GetKernelName (), LogNotice, "DOS clock set: %s%s", Now,
+								BareCoreSyncDosClock () ? "" : " (no bios-time-sync.patch)");
+				}
+			}
+		}
+
+		// A DOS restart that failed: the new DOSBox quit as it started (a
+		// fatal error).  Say what DOSBox said, keep it on the card, and
+		// restart the board - never a black, dead screen.
+		if (BareCoreRestartFailed ())
+		{
+			const char *pError = BareCoreLastError ();
+			char Message[200];
+			snprintf (Message, sizeof Message, "DOS no arranco tras el reinicio: %s",
+				  pError[0] != '\0' ? pError : "(sin mensaje)");
+			CLogger::Get ()->Write (GetKernelName (), LogError, "%s", Message);
+			if (FILE *pFile = fopen ("SD:/bmdos-error.txt", "w"))
+			{
+				fprintf (pFile, "%s\n", Message);
+				fclose (pFile);
+			}
+			BareMenuShowMessage (Message);
+			CScheduler::Get ()->MsSleep (6000);
+			BareMenuShowMessage ("Reiniciando la placa...");
+			BareCoreRequestReboot ();
+		}
+
 		if (BareCoreRestartWanted ())
 		{
 			BareMenuShowMessage ("Reiniciando DOS...");
@@ -1409,6 +1450,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 			BareSysInfoGovernorResumed ();	// audio gaps right after this are not load
 			BareProfileRestart ();			// nor is this window's timing
 			s_nHomePsp = s_nLastPsp = 0;		// a new shell, a new PSP
+			s_bDosClockSet = BareNetTimeValid ();	// the new DOSBox read the clock
 			nFrameIndex = 0;
 			continue;
 		}

@@ -83,6 +83,9 @@ BareCorePollRefreshMilliHz
 BareCoreReleaseAllKeys
 BareCoreRequestShutdown
 BareCoreRequestReboot
+BareCoreRestartFailed
+BareCoreLastError
+BareCoreSyncDosClock
 # Restarting DOS without restarting the board (bare_libretro.cpp).
 BareCoreRequestDosRestart
 BareCoreRestart
@@ -94,6 +97,7 @@ BareDiskAvailable
 BareDiskInUse
 BareDosFileOpen
 BareDosCurrentPsp
+BareDosForgetDevices
 # The profiler reads the ARM timer with inline asm: board only.
 BareProfileClock
 BareProfileAdd

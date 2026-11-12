@@ -383,6 +383,17 @@ void    BareCoreReleaseAllKeys (void);
 void    BareCoreRequestShutdown (void);
 void    BareCoreRequestReboot (void);
 
+/// \brief DOSBox quit soon after a DOS restart: the restart failed (a fatal
+///\t   error as the new DOSBox started).  The frame loop restarts the board.
+boolean BareCoreRestartFailed (void);
+
+/// \brief The last error DOSBox logged ("" if none since the last restart).
+const char *BareCoreLastError (void);
+
+/// \brief Set DOS's date and BIOS clock from the board's clock again (after
+///\t   NTP answered).  Between frames.  FALSE without the DOSBox patch.
+boolean BareCoreSyncDosClock (void);
+
 /// \brief Restart DOS - unload DOSBox and load it again, without restarting
 ///\t   the board.  Requested by the emulated BIOS (Ctrl+Alt+Del, a program
 ///\t   rebooting the machine) or the setup menu; done by the frame loop,
@@ -418,6 +429,11 @@ char    BareDosFileOpen (const char *pCardPath);
 /// \brief DOS's current PSP (the running program's segment); it changes when a
 ///\t   program starts or ends (bare_dosfiles.cpp).
 unsigned BareDosCurrentPsp (void);
+
+/// \brief Empty DOS's device table after DOSBox was taken down, before it starts
+///\t   again (DOS restart): its CON / NUL / LPT1 are never removed, and the
+///\t   ten slots ran out after a restart or two (bare_dosfiles.cpp).
+void    BareDosForgetDevices (void);
 
 // ---------------------------------------------------------------------------
 // Profiler - bare_profile.cpp (item 5): where core 0's time goes

@@ -103,3 +103,23 @@ unsigned BareDosCurrentPsp (void)
 {
 	return dos.psp ();
 }
+
+// DOS's device table (dos_devices.cpp): ten slots.  Every DOS start adds CON,
+// NUL and LPT1 (DOS_SetupDevices), and nothing takes them out when DOSBox is
+// taken down - only EMS and the serial ports remove theirs.  So each DOS
+// restart left three behind, and the second or third (sooner with serial
+// ports or a CD) stopped with "DOS:Too many devices added": a fatal error as
+// the new DOSBox started, which the port then took for "power off" - a black,
+// dead screen (seen on the board, 12-nov).  Called by the DOS restart after
+// the old machine is gone and before the new one: the slots are emptied.  The
+// leftover objects are not deleted - a few hundred bytes per restart, against
+// running destructors of a machine that no longer exists.
+// (Devices[] is declared in dos_inc.h.)
+
+void BareDosForgetDevices (void)
+{
+	for (unsigned i = 0; i < DOS_DEVICES; i++)
+	{
+		Devices[i] = nullptr;
+	}
+}

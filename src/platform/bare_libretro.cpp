@@ -132,6 +132,14 @@ bool s_KeyState[512];
 // to be here came from.)  Inside, switch(level) with the RETRO_LOG_* constants
 // is unchanged: they become plain int values here, which is what Circle's
 // logger wants.
+// The last error DOSBox logged: E_Exit's message among them.  Shown on screen
+// when a DOS restart fails (the log itself goes to the serial port).
+static char s_LastCoreError[160] = "";
+
+// A DOS restart that fails shows up as DOSBox quitting soon after it.
+static u64 s_nRestartedMicros = 0;		// when the last DOS restart finished
+static boolean s_bRestartFailed = FALSE;	// DOSBox quit soon after it
+
 static void BareLogCallback (retro_log_level level, const char *fmt, ...)
 {
 	char buffer[256];
@@ -149,6 +157,15 @@ static void BareLogCallback (retro_log_level level, const char *fmt, ...)
 	case RETRO_LOG_WARN:	circleLevel = 3; break;
 	case RETRO_LOG_ERROR:
 	default:		circleLevel = 4; break;
+	}
+
+	if (level == RETRO_LOG_ERROR)
+	{
+		// Cut to what fits (a screen line or two), on purpose.
+		strncpy (s_LastCoreError, buffer, sizeof s_LastCoreError - 1);
+		s_LastCoreError[sizeof s_LastCoreError - 1] = '\0';
+		const size_t n = strlen (s_LastCoreError);
+		if (n != 0 && s_LastCoreError[n - 1] == '\n') s_LastCoreError[n - 1] = '\0';
 	}
 
 	BareLog (circleLevel, buffer);
@@ -787,6 +804,17 @@ static bool BareEnvironment (unsigned cmd, void *data)
 		return true;		// accepted, nothing to do
 
 	case RETRO_ENVIRONMENT_SHUTDOWN:
+		// DOSBox asks to quit: its shell's EXIT, or a fatal error (E_Exit).
+		// Soon after a DOS restart that is the restart failing - a new
+		// DOSBox that found something wrong as it started - and it must not
+		// be taken for "power off": the board would just stop, the screen
+		// black (seen on the board, 12-nov).  The frame loop shows the error
+		// and restarts the board instead.
+		if (s_nRestartedMicros != 0 && BareMicros () - s_nRestartedMicros < 30000000ULL)
+		{
+			s_bRestartFailed = TRUE;
+			return true;
+		}
 		s_bWantsExit = TRUE;
 		return true;
 
@@ -1344,6 +1372,10 @@ boolean BareDiskAvailable (void)
 
 static volatile boolean s_bRestartWanted = FALSE;
 
+// patches/dosbox-core/bios-time-sync.patch: DOS's date and BIOS clock from the
+// host again.  Weak: without the patch the clock is simply not set later.
+extern void BIOS_SyncHostTime (void) __attribute__ ((weak));
+
 // State DOSBox keeps outside its sections, which its own teardown leaves set,
 // and which a machine built again in the same process must not inherit:
 //   * CPU::inited (patches/dosbox-core/cpu-forget-init.patch): without the
@@ -1408,6 +1440,7 @@ boolean BareCoreRestart (void)
 	retro_deinit ();
 
 	// What stays behind.
+	BareDosForgetDevices ();		// "DOS:Too many devices added" otherwise
 	CPU_ForgetInit ();
 	if (BareDynrecCacheForget != nullptr)
 	{
@@ -1437,6 +1470,8 @@ boolean BareCoreRestart (void)
 
 	CLogger::Get ()->Write (FromBare, LogNotice, "DOS restarted in %u ms",
 				static_cast<unsigned> ((BareMicros () - nStart) / 1000));
+	s_nRestartedMicros = BareMicros ();
+	s_LastCoreError[0] = '\0';	// errors from now on are the new DOSBox's
 	return TRUE;
 }
 
@@ -1468,4 +1503,25 @@ char BareDiskInUse (const char *pCardPath)
 		}
 	}
 	return 0;
+}
+
+boolean BareCoreRestartFailed (void)
+{
+	return s_bRestartFailed;
+}
+
+const char *BareCoreLastError (void)
+{
+	return s_LastCoreError;
+}
+
+boolean BareCoreSyncDosClock (void)
+{
+	// Between two frames (the frame loop), never inside one.
+	if (BIOS_SyncHostTime == nullptr)
+	{
+		return FALSE;
+	}
+	BIOS_SyncHostTime ();
+	return TRUE;
 }

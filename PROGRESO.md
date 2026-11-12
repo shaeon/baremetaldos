@@ -99,6 +99,23 @@ proyecto, igual en todos los kernels; ahora se añade el commit
 (build/bmdos_version.h, generado por el Makefile).  Hecho y entregado
 ("net: wait by yielding...").  Falta: probar en placa cuánto tarda la IP.
 
+**Tres fallos del usuario (12-nov, tras "net: wait by yielding"):**
+1. Hora: DOS siempre en 1970 (el WiFi tarda más de los 5 s de espera).  Hecho:
+   patches/dosbox-core/bios-time-sync.patch (BIOS_SyncHostTime) y el bucle
+   pone el reloj de DOS en cuanto hay hora de red; el arranque ya no espera.
+2. IP que no llega con el menú (BIOS) abierto: con el kernel anterior el menú
+   esperaba girando; c8751c6 ya lo cambió a MsSleep.  PROBAR con el kernel nuevo.
+3. Reinicio de DOS: "Reiniciando DOS..." y pantalla negra muerta.  Causa: el
+   DOSBox nuevo falla al arrancar (E_Exit) -> pide SHUTDOWN -> el port APAGABA
+   la placa.  Hecho: tras un reinicio, ese SHUTDOWN se trata como fallo: se
+   muestra el error de DOSBox, se guarda en SD:/bmdos-error.txt y se reinicia
+   la placa.  CAUSA RAÍZ PROBABLE ENCONTRADA: la tabla de dispositivos de DOS
+   (10 huecos) no se vacía al desmontar: cada arranque añade CON/NUL/LPT1 y
+   nunca se quitan -> "DOS:Too many devices added" al 2º-3er reinicio.
+   Arreglo: BareDosForgetDevices (bare_dosfiles.cpp) en el reinicio.  Si aún
+   falla, el mensaje en pantalla / SD:/bmdos-error.txt dirá qué.
+Compilado; commit "dos: the restart survives..."; falta probar en placa.
+
 ### Revisión completa del proyecto (pedida por el usuario, 12-nov)
 
 "Ahora que funciona y estamos afinando: revísalo y ve arreglando lo que veas;

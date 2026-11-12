@@ -1,0 +1,19 @@
+diff --git a/src/ints/bios.cpp b/src/ints/bios.cpp
+index 64f3663b..1d3adacf 100644
+--- a/src/ints/bios.cpp
++++ b/src/ints/bios.cpp
+@@ -564,6 +564,14 @@ static void BIOS_HostTimeSync() {
+ 	mem_writed(BIOS_TIMER,ticks);
+ }
+ 
++// BM-DOS: set DOS's date and the BIOS clock from the host again, after DOS
++// started.  The board has no clock of its own: when the network's time (NTP)
++// arrives after DOS booted, DOS would otherwise keep 1970.  The frontend calls
++// this between two frames, never inside one.
++void BIOS_SyncHostTime(void) {
++	BIOS_HostTimeSync();
++}
++
+ static Bitu INT8_Handler(void) {
+ 	/* Increase the bios tick counter */
+ 	Bit32u value = mem_readd(BIOS_TIMER) + 1;
