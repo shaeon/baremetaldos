@@ -412,6 +412,12 @@ std::string NormaliseCycles (const std::string &In)
 
 std::vector<TSetting> s_Settings;
 
+std::string Fit (const std::string &Text, unsigned nWidth);
+
+// The widths of the menu's columns (menu_model.h).
+constexpr unsigned LabelWidth = CMenu::ValueCol - CMenu::LabelCol - 1;	// 23
+constexpr unsigned ValueWidth = CMenu::ApplyCol - CMenu::ValueCol - 1;	// 24
+
 TSetting *FindSetting (int nId);
 
 void DefineSettings (void)
@@ -740,12 +746,9 @@ void DefineSettings (void)
 	{
 		s_Settings.push_back ({ nPort == 1 ? SetSerial1 : SetSerial2, FileDOSBox, "serial",
 			nPort == 1 ? "serial1" : "serial2", nPort == 1 ? "COM1" : "COM2",
-			"Lo que DOS encuentra en el puerto serie. Módem: para BBS y terminales; marca "
-			"con ATDT servidor:puerto (por ejemplo ATDT bbs.ejemplo.com:23) por la red de "
-			"la placa. Módem que contesta: además acepta llamadas telnet entrantes al "
-			"puerto 23. Null-modem: un cable serie con otro DOSBox por TCP; este lado "
-			"espera en el puerto 2323 (el otro se configura en su dosbox.conf con "
-			"nullmodem server:IP port:2323).",
+			"Módem: para BBS, ATDT servidor:puerto por la red de la placa. Que contesta: "
+			"acepta también telnet entrante al puerto 23. Null-modem: cable serie con otro "
+			"DOSBox por TCP; espera en el 2323 (el otro: nullmodem server:IP port:2323).",
 			TApply::RestartDOSBox,
 			{ { "Nada", "dummy" }, { "Módem", "modem" }, { "Módem que contesta", "modem listenport:23" },
 			  { "Null-modem (espera)", "nullmodem port:2323" }, { "Desactivado", "disabled" } },
@@ -755,7 +758,7 @@ void DefineSettings (void)
 	{
 		TSetting IP { SetNetIP, FileBoot, "", "ip", "Dirección IP",
 			"DHCP: la da el router. Fija: siempre la misma, útil para entrar por la red "
-			"desde el PC. \"Fijar la actual\" guarda como fija la que tiene ahora, con su "
+			"desde el PC. \"Fijar\" guarda como fija la que tiene ahora, con su "
 			"puerta de enlace y su DNS. Otra distinta se escribe en boot.conf (ip =, "
 			"gateway =, dns =).",
 			TApply::RestartBoard, { { "DHCP", "dhcp" } }, 0, nullptr };
@@ -773,7 +776,7 @@ void DefineSettings (void)
 			s_NetCurrentChoice = Choice;
 			s_NetCurrentGateway = Net.Gateway;
 			s_NetCurrentDNS = Net.DNS;
-			IP.Choices.push_back ({ "Fijar la actual: " + std::string (Net.IP), s_NetCurrentChoice });
+			IP.Choices.push_back ({ "Fijar: " + std::string (Net.IP), s_NetCurrentChoice });
 		}
 		s_Settings.push_back (IP);
 	}
@@ -917,10 +920,37 @@ void LoadSettings (void)
 				for (const TChoice &C : S.Choices) bKnown = bKnown || C.Value == Value;
 				if (!bKnown)
 				{
-					S.Choices.insert (S.Choices.begin (), TChoice { Value, Value });
+					S.Choices.insert (S.Choices.begin (), TChoice { Fit (Value, ValueWidth - 2), Value });
 					S.nDefault++;		// the default stays the same mode
 				}
 			}
+		}
+		else if (S.nId == SetWiFiCountry)
+		{
+			// Before the boot.conf branch: it is declared with the boot.conf
+			// settings but lives in wpa_supplicant.conf, and used to fall into
+			// that branch - always showing the default, whatever the file said.
+			// The active country= line, as wpa_supplicant reads it: not one in
+			// a comment (the template's comments mention it).
+			S.nSaved = S.nPending = S.nDefault;
+			std::string WPA;
+			ReadText ("SD:/wpa_supplicant.conf", &WPA);
+			size_t n = 0;
+			while (n < WPA.size ())
+			{
+				size_t e = WPA.find ('\n', n);
+				if (e == std::string::npos) e = WPA.size ();
+				const std::string Line = bareconf::Trim (WPA.substr (n, e - n));
+				if (Line.compare (0, 8, "country=") == 0)
+				{
+					const std::string Code = bareconf::Trim (Line.substr (8));
+					for (unsigned i = 0; i < S.Choices.size (); i++)
+						if (S.Choices[i].Value == Code) { S.nSaved = S.nPending = i; }
+					break;
+				}
+				n = e + 1;
+			}
+			continue;
 		}
 		else if (S.File == FileBoot)
 		{
@@ -929,22 +959,6 @@ void LoadSettings (void)
 		else if (S.File == FileCmdline)
 		{
 			bFound = bareconf::CmdlineGet (Cmdline, S.pKey, &Value);
-		}
-		else if (S.nId == SetWiFiCountry)
-		{
-			std::string WPA;
-			ReadText ("SD:/wpa_supplicant.conf", &WPA);
-			const size_t n = WPA.find ("country=");
-			if (n != std::string::npos)
-			{
-				Value = bareconf::Trim (WPA.substr (n + 8, 2));
-				bFound = true;
-			}
-			// Upper case is how it is written: compare as such.
-			for (unsigned i = 0; i < S.Choices.size (); i++)
-				if (S.Choices[i].Value == Value) { S.nSaved = S.nPending = i; }
-			if (!bFound) S.nSaved = S.nPending = S.nDefault;
-			continue;
 		}
 		else if (S.nId == SetKeyb)
 		{
@@ -1007,7 +1021,9 @@ void LoadSettings (void)
 			for (const TChoice &C : S.Choices) bKnown = bKnown || C.Value == Value;
 			if (!bKnown && !Value.empty ())
 			{
-				S.Choices.insert (S.Choices.begin (), TChoice { Value, Value });
+				// Shown as it is in the file, cut to fit (the whole value is
+				// written back unchanged: only the label is shortened).
+				S.Choices.insert (S.Choices.begin (), TChoice { Fit (Value, ValueWidth - 2), Value });
 				S.nDefault++;
 			}
 		}
@@ -1315,6 +1331,25 @@ std::string Format (const char *pFormat, ...)
 	return Buffer;
 }
 
+// A name the menu does not choose (a WiFi network, a file) cut to a width the
+// DOS way, "Monkey Island 2 - LeCh~"; the caller puts the whole name in the
+// help pane, which has room for it.
+std::string Fit (const std::string &Text, unsigned nWidth)
+{
+	if (CScreen::Length (Text) <= nWidth)
+	{
+		return Text;
+	}
+	std::string Out;
+	size_t i = 0;
+	for (unsigned n = 0; n + 1 < nWidth && i < Text.size (); n++)
+	{
+		CScreen::Encode (Out, CScreen::Decode (Text, i));
+	}
+	return Out + "~";
+}
+
+
 TItem Info (const std::string &Label, const std::string &Value, const std::string &Help = "")
 {
 	TItem Item;
@@ -1371,7 +1406,7 @@ TPage PageSistema (void)
 	if (nFirmware & 0x01) Power = "¡TENSIÓN BAJA!";
 	else if (nFirmware & 0x08) Power = "límite de temperatura";
 	else if (nFirmware & 0x06) Power = "reloj recortado";
-	else if (nFirmware & 0x10000) Power = "normal (hubo tensión baja)";
+	else if (nFirmware & 0x10000) Power = "bien; hubo tensión baja";
 
 	const u64 nSeconds = BareMicros () / 1000000;
 
@@ -1410,16 +1445,20 @@ TPage PageSistema (void)
 			? (BareMidiActive () ? Format ("MIDI (%s)", pMidi) : std::string ("MIDI (en espera)"))
 			: std::string ("libre")),
 		Info ("Núcleo 2", Video.bRunning
-			? Format ("vídeo, %llu frames, vsync %s", (unsigned long long) Video.nShown,
-				  Video.bVsync ? "sí" : "no")
-			: std::string ("libre")),
+			? std::string (Video.bVsync ? "vídeo, con vsync" : "vídeo, sin vsync")
+			: std::string ("libre"),
+			Video.bRunning ? Format ("Escala y presenta la imagen. %llu fotogramas mostrados.",
+						 (unsigned long long) Video.nShown) : std::string ()),
 		Info ("Núcleo 3", "libre"),
 
 		Section ("Pantalla y sonido"),
 		Info ("Resolución", Format ("%ux%u", nModeW, nModeH)),
 		Info ("Escalado", BareVideoSharpScaling () ? "nítido" : "suave"),
 		Info ("Salida de audio", BareAudioDeviceName ()),
-		Info ("MIDI", BareMidiStatus ()),
+		Info ("MIDI", !BareMidiActive () ? std::string ("apagado")
+			      : strcmp (BareMidiName (), "mt32") == 0 ? std::string ("Roland MT-32")
+			      : std::string ("General MIDI"),
+		      BareMidiStatus ()),
 	};
 	return P;
 }
@@ -1566,16 +1605,18 @@ TPage PageWiFi (void)
 		const TBareWiFiNetwork &N = s_WiFiNetworks[i];
 		const int nRSSI = N.nRSSI;
 		const char *pBars = nRSSI >= -55 ? "||||" : nRSSI >= -67 ? "|||." : nRSSI >= -75 ? "||.." : "|...";
-		TItem Item = Action (N.SSID, ActWiFiEntry + static_cast<int> (i),
-			N.bSecure ? "Intro: escribir la contraseña de esta red."
-				  : "Red abierta, sin contraseña. Intro: elegirla.");
+		TItem Item = Action (Fit (N.SSID, LabelWidth), ActWiFiEntry + static_cast<int> (i),
+			std::string (N.SSID) + "\n\n"
+			+ (N.bSecure ? "Intro: escribir la contraseña de esta red."
+				     : "Red abierta, sin contraseña. Intro: elegirla."));
 		Item.Value = Format ("%s %d dBm %s", pBars, nRSSI, N.bSecure ? "clave" : "abierta");
 		P.Items.push_back (Item);
 	}
 	P.Items.push_back (Section (""));
 	P.Items.push_back (Action ("Buscar de nuevo", ActWiFiRescan, "Actualiza la lista."));
-	P.Items.push_back (Action ("Escribir el nombre a mano", ActWiFiManual,
-		"Para una red oculta, o si aún no aparece en la lista."));
+	P.Items.push_back (Action ("Escribir el nombre", ActWiFiManual,
+		"Escribir a mano el nombre de la red: para una red oculta, o si aún no "
+		"aparece en la lista."));
 	return P;
 }
 
@@ -1664,7 +1705,7 @@ TPage PageBrowser (void)
 		: "Elegir CD (.iso / .cue) para D:";
 	P.Help = "Intro abre una carpeta. Esc vuelve sin elegir nada.";
 
-	P.Items.push_back (Section (s_BrowsePath));
+	P.Items.push_back (Section (Fit (s_BrowsePath, CMenu::HelpCol - 2 - CMenu::LabelCol)));
 	if (bFolders)
 	{
 		P.Items.push_back (Action ("[ Elegir esta carpeta ]", ActBrowsePick,
@@ -1677,12 +1718,14 @@ TPage PageBrowser (void)
 	for (size_t i = 0; i < s_BrowseEntries.size (); i++)
 	{
 		const auto &E = s_BrowseEntries[i];
-		P.Items.push_back (Action (E.second ? E.first + "/" : E.first,
+		const std::string Name = E.second ? E.first + "/" : E.first;
+		P.Items.push_back (Action (Fit (Name, LabelWidth),
 					   ActBrowseEntry + static_cast<int> (i),
-					   E.second ? "Intro: entrar en la carpeta."
-						    : s_Browse == TBrowse::Game
-						      ? "Intro: arrancar este programa al encender."
-						      : "Intro: meter esta imagen en la unidad, al momento."));
+					   Name + "\n\n"
+					   + (E.second ? "Intro: entrar en la carpeta."
+						       : s_Browse == TBrowse::Game
+							 ? "Intro: arrancar este programa al encender."
+							 : "Intro: meter esta imagen en la unidad, al momento.")));
 	}
 	if (s_BrowseEntries.empty ())
 	{
@@ -1882,12 +1925,7 @@ void BuildPages (void)
 		const unsigned nLevels = BareSysInfoGovernorLevels (Levels);
 		TBareGovernorStats Gov;
 		BareSysInfoGovernorStats (&Gov);
-		std::string LevelShare;
-		for (unsigned i = 0; i < Gov.nLevels && i < 8; i++)
-		{
-			LevelShare += (i ? "  " : "") + Format ("%u: %u %%", Gov.nMHz[i], Gov.nPercentAt[i]);
-		}
-		if (LevelShare.empty ()) LevelShare = "-";
+
 		std::string LevelText;
 		for (unsigned i = 0; i < nLevels && i < 8; i++)
 		{
@@ -1911,19 +1949,30 @@ void BuildPages (void)
 			      "a 70 Hz), en media.  Por encima del 90 % el fotograma no llega y, si "
 			      "sigue así, el governor sube el reloj; por debajo del 75 % va holgado y "
 			      "lo baja al cabo de un rato."),
-			Info ("Cambios", Format ("%u subidas, %u bajadas", Gov.nUps, Gov.nDowns)),
-			Info ("Último", Gov.pLastReason != nullptr && Gov.pLastReason[0] != '\0'
-					 ? Format ("%s, hace %u s", Gov.pLastReason, Gov.nSecondsSinceChange)
-					 : std::string ("ninguno todavía"),
+			Info ("Cambios", Format ("%u arriba, %u abajo", Gov.nUps, Gov.nDowns),
+			      "Cuántas veces ha subido y bajado el reloj desde el arranque."),
+			Info ("Último cambio", Gov.pLastReason != nullptr && Gov.pLastReason[0] != '\0'
+					 ? std::string (Gov.pLastReason) : std::string ("ninguno todavía"),
 			      "Por qué cambió el reloj la última vez: no llega, va holgado, pantalla "
 			      "quieta, prompt de DOS, temperatura o el modo fijo."),
-			Info ("Tiempo en cada nivel", LevelShare,
-			      "Qué parte del tiempo desde el arranque ha pasado en cada reloj."),
+			Info ("  hace", Gov.pLastReason != nullptr && Gov.pLastReason[0] != '\0'
+					? Format ("%u:%02u:%02u", Gov.nSecondsSinceChange / 3600,
+						  Gov.nSecondsSinceChange / 60 % 60, Gov.nSecondsSinceChange % 60)
+					: std::string ("-")),
 			Info ("Estado", BareSysInfoGovernorState (),
 			      "Lo mismo que muestra el panel (PetSis): el nivel, y si el emulador va "
 			      "holgado o justo."),
 			Info ("Temperatura", Format ("%u °C", nCelsius)),
 		};
+
+		// The time spent at each clock, one line each (three levels did not
+		// fit on one line).
+		P.Items.push_back (Section ("Tiempo en cada reloj"));
+		for (unsigned i = 0; i < Gov.nLevels && i < 8; i++)
+		{
+			P.Items.push_back (Info (Format ("  %u MHz", Gov.nMHz[i]), Format ("%u %%", Gov.nPercentAt[i]),
+						 "Qué parte del tiempo desde el arranque ha pasado en este reloj."));
+		}
 		Pages.push_back (P);
 	}
 
@@ -1939,7 +1988,7 @@ void BuildPages (void)
 		BareNetLocalTime (Now, sizeof Now);
 
 		// The WiFi network named in wpa_supplicant.conf, for reference.
-		std::string SSID = "(sin wpa_supplicant.conf)";
+		std::string SSID = "(falta el fichero)";
 		{
 			std::string Text;
 			if (ReadText ("SD:/wpa_supplicant.conf", &Text))
@@ -1959,13 +2008,16 @@ void BuildPages (void)
 			Section ("La placa"),
 			SettingItem (*FindSetting (SetNetwork)),
 			SettingItem (*FindSetting (SetNetIP)),
-			Info ("Red WiFi", SSID, "La red de SD:/wpa_supplicant.conf."),
+			Info ("Red WiFi", Fit (SSID, ValueWidth), "La red de SD:/wpa_supplicant.conf:\n" + SSID),
 			Action ("Elegir red WiFi", ActWiFiList,
 				"Las redes que ve la placa, de la más fuerte a la más débil; eliges una y "
 				"escribes su contraseña. Se guarda en wpa_supplicant.conf."),
 			SettingItem (*FindSetting (SetWiFiCountry)),
 			Section ("Estado"),
-			Info ("Estado", BareNetState ()),
+			Info ("Estado", BareNetReady () ? std::string ("conectada")
+					: BareNetMode () == BareNetOff ? std::string ("apagada")
+					: std::string ("sin conexión"),
+			      BareNetState ()),
 			Info ("Dirección", Or (Net.IP)),
 			Info ("Máscara", Or (Net.Mask)),
 			Info ("Puerta de enlace", Or (Net.Gateway)),
@@ -1976,10 +2028,9 @@ void BuildPages (void)
 			SettingItem (*FindSetting (SetTimeZone)),
 			Info ("Hora ahora", Now, "La de la red (NTP, pool.ntp.org) en la zona elegida. "
 			      "Sin red, la placa no sabe la hora: DOS empieza en 1970."),
-			Section ("Puertos serie"),
+			Section ("Para DOS: puertos serie y juego en red"),
 			SettingItem (*FindSetting (SetSerial1)),
 			SettingItem (*FindSetting (SetSerial2)),
-			Section ("Juego en red"),
 			SettingItem (*FindSetting (SetIPX)),
 			Section ("Servidor web"),
 			SettingItem (*FindSetting (SetWebServer)),
@@ -2284,7 +2335,7 @@ void HandleWiFi (const TEvent &Ev)
 	s_bWiFiSecure = s_WiFiNetworks[i].bSecure;
 	if (s_bWiFiSecure)
 	{
-		OpenTextInput (InWiFiPassword, "Contraseña", "Contraseña de \"" + s_WiFiSSID + "\":",
+		OpenTextInput (InWiFiPassword, "Contraseña", "Contraseña de \"" + Fit (s_WiFiSSID, 40) + "\":",
 			       "", 8, 63);
 	}
 	else
@@ -2304,7 +2355,7 @@ void HandleEvent (const TEvent &Ev)
 			s_WiFiSSID = Ev.Text;
 			s_bWiFiSecure = true;
 			OpenTextInput (InWiFiPassword, "Contraseña",
-				       "Contraseña de \"" + s_WiFiSSID + "\" (vacía si es abierta):",
+				       "Contraseña (vacía si la red es abierta):",
 				       "", 0, 63);
 			return;
 		}

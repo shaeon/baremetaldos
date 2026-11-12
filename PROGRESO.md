@@ -89,7 +89,21 @@ cuentas salen del metrónomo  [x] pruebas PC  [x] compilar  [x] commit + bundle 
         qué distribución se leen las teclas.
       - WiFi: se rechazaban comillas y barras invertidas; wpa_supplicant lee
         hasta la ÚLTIMA comilla (config.c os_strrchr) -> permitidas.
-- [~] R2. Menú: guardar/descartar/por defecto contra los ficheros reales.
+- [x] R2. Menú (punto 11 de la lista).  NOTA: encontrado a medias de una
+      sesión cortada; su petición ("revisa todo el texto...") no está en la
+      conversación visible, pero entra en la revisión aprobada.  Revisado: la
+      prueba nueva da 14 fallos con el menú anterior y 0 con el nuevo.
+      Pedido (según la sesión cortada) 12-nov junto con:
+      "revisa todo el texto, hay partes que se cortan o no caben").
+      Plan: [x] prueba en el PC que construye todas las pestañas con el
+      bare_menu.cpp real (make check-menu-text, en check-host): 15 textos no
+      cabían -> 0  [x] corregidos (valores cortos + texto completo en la
+      ayuda; nombres largos con "~" al estilo DOS; Rendimiento por niveles;
+      Red cabe sin desplazar)  [x] releído LoadSettings / Discard / Defaults:
+      el País del WiFi nunca se leía (caía en la rama de boot.conf) y buscaba
+      country= también en comentarios -> arreglado y con prueba
+      [x] compilar, commit, bundle ("menu: every text fits...").
+      Antes:
       Hecho: releído SaveSettings.  Encontrado y corregido: "País del WiFi"
       cambiado sin elegir red se marcaba guardado y no se escribía (ahora
       actualiza la línea country= de wpa_supplicant.conf).

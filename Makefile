@@ -1370,6 +1370,16 @@ check-pace:
 		-o build/pace_test scripts/hostcheck/pace_test.cpp
 	@build/pace_test
 
+# Every text of the setup menu fits where it is drawn: the real bare_menu.cpp,
+# every page, over stand-ins that return the longest plausible values.
+.PHONY: check-menu-text
+check-menu-text:
+	@mkdir -p build
+	@$(HOST_CXX) -std=gnu++23 -O0 -w -Iscripts/hostcheck -Isrc/platform \
+		-o build/menu_text_test scripts/hostcheck/menu_text_test.cpp \
+		scripts/hostcheck/menu_text_stubs.cpp
+	@build/menu_text_test
+
 # The setup menu's model and layout (menu_model.h): pages, cursor, keys, and
 # the 80x30 grid.
 .PHONY: check-menu
@@ -1466,7 +1476,7 @@ check-dynarec-hook:
 # config parser.  This is the target to run before a cross build.
 check-host: check-platform check-kernel check-bootconf check-scaling check-dynarec \
             check-coreopts check-resample check-storage check-governor check-portorder \
-            check-dynarec-hook check-midi check-frames check-audio check-scale check-menu check-conf check-web check-keys check-pace
+            check-dynarec-hook check-midi check-frames check-audio check-scale check-menu check-menu-text check-conf check-web check-keys check-pace
 print-srcs:
 	@echo $(ALL_SRCS)
 
