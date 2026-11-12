@@ -19,8 +19,10 @@
 //   POST /delete?path=/dos/X  a file, or a folder and everything in it
 //   POST /rename?path=/dos/X  name=Y in the body: X becomes Y, same folder
 //   POST /move?path=/dos/X    to=/dest in the body: X goes into folder /dest
-//   POST /password            new=P in the body: the password from now on
-//                             (empty: none), kept in boot.conf web_password
+//
+// The password is set in the setup menu (Red) or in boot.conf web_password,
+// not from the page: changing it from the web may come back later on a web
+// settings page of its own.
 //
 // The page sends each file of an upload as its own PUT, from JavaScript, with
 // the folder structure in the path - no multipart parsing on this side.
@@ -35,7 +37,6 @@
 //
 #include "bare_env.h"
 #include "web_util.h"
-#include "conf_edit.h"
 
 #include <circle/logger.h>
 #include <circle/net/in.h>
@@ -152,33 +153,6 @@ bool ReadSmallBody (CSocket *pSocket, const std::string &Already, u64 nLength, s
 	return true;
 }
 
-// boot.conf's web_password, changed in place (conf_edit.h keeps the rest of
-// the file as it is), through a temporary file and a rename.
-bool SavePassword (const std::string &Password)
-{
-	std::string Text;
-	if (FILE *pFile = fopen ("SD:/boot.conf", "rb"))
-	{
-		char Buffer[512];
-		size_t n;
-		while ((n = fread (Buffer, 1, sizeof Buffer, pFile)) != 0) Text.append (Buffer, n);
-		fclose (pFile);
-	}
-	bareconf::CConfText Conf (Text, true);
-	Conf.Set ("", "web_password", Password);
-	const std::string New = Conf.Text ();
-
-	FILE *pFile = fopen ("SD:/boot.conf.new", "wb");
-	if (pFile == nullptr) return false;
-	const bool bOk = fwrite (New.data (), 1, New.size (), pFile) == New.size ();
-	if (fclose (pFile) != 0 || !bOk)
-	{
-		remove ("SD:/boot.conf.new");
-		return false;
-	}
-	remove ("SD:/boot.conf");
-	return rename ("SD:/boot.conf.new", "SD:/boot.conf") == 0;
-}
 
 // Why a delete, rename or move must be refused, or "" if it need not: a disk
 // image DOS has in a drive, or a file a DOS program has open - there or inside
@@ -222,9 +196,11 @@ std::string Page (const std::string &Dir)
 	     "td,th{padding:.35em .6em;border-bottom:1px solid #888;text-align:left}"
 	     "th{background:#555;color:#fff}td.n{text-align:right;white-space:nowrap}"
 	     "td a{color:#0000aa}button{font:inherit;cursor:pointer}"
-	     "#drop{border:2px dashed #55ffff;padding:1em;margin:1em 0;text-align:center}"
+	     ".bar{display:flex;flex-wrap:wrap;gap:.5em;align-items:center;margin:.5em 0 1em}"
+	     ".btn{display:inline-block;cursor:pointer;font:inherit;padding:.3em .8em;"
+	     "border:1px solid #55ffff;background:#0000aa;color:#fff}"
+	     "#drop{flex:1;min-width:16em;border:2px dashed #55ffff;padding:.6em;text-align:center}"
 	     "#drop.on{background:#0000ff}#log{white-space:pre-wrap;font-family:monospace}"
-	     "form.pw input{font:inherit;margin:.2em .4em .2em 0}"
 	     "</style></head><body><header>BM-DOS &mdash; tarjeta SD"
 	     "<span style='float:right;font-weight:normal'>libre: " + FreeSpace () + "</span>"
 	     "</header><main>";
@@ -243,6 +219,16 @@ std::string Page (const std::string &Dir)
 		i = e + 1;
 	}
 	H += "</p>";
+
+	// The actions first, above the list: upload files, upload a folder, a new
+	// folder, and the drop zone - what the page is for, without scrolling
+	// down a long folder to find it.
+	H += "<div class=bar>"
+	     "<label class=btn>Subir ficheros<input type=file id=files multiple hidden></label>"
+	     "<label class=btn>Subir carpeta<input type=file id=dirs webkitdirectory multiple hidden></label>"
+	     "<button class=btn onclick=mkdir()>Nueva carpeta</button>"
+	     "<div id=drop>o arrastra aquí ficheros o carpetas para subirlos a <b>" + HtmlEscape (Dir) + "</b></div>"
+	     "</div><div id=log></div>";
 
 	H += "<table><tr><th>Nombre</th><th class=n>Tamaño</th><th></th></tr>";
 	if (Dir != "/")
@@ -266,21 +252,8 @@ std::string Page (const std::string &Dir)
 	}
 	H += "</table>";
 
-	H += "<div id=drop>Arrastra aquí ficheros o carpetas para subirlos a <b>" + HtmlEscape (Dir) + "</b>"
-	     "<br><br><input type=file id=files multiple> <input type=file id=dirs webkitdirectory multiple>"
-	     "</div><p><button onclick=mkdir()>Nueva carpeta</button></p><div id=log></div>"
-	     "<p><small>Si DOS está en marcha, escribe <b>RESCAN</b> para que vea lo que subas. "
+	H += "<p><small>Si DOS está en marcha, escribe <b>RESCAN</b> para que vea lo que subas. "
 	     "No cortes la corriente mientras se sube algo.</small></p>";
-	H += std::string ("<h3>Contraseña</h3><p>") + (s_Password.empty ()
-		? "Ahora <b>sin contraseña</b>: cualquiera en tu red puede entrar aquí."
-		: "Ahora <b>con contraseña</b> (el navegador la pide; vale cualquier usuario).")
-	     + "</p><form class=pw onsubmit='return setpw(event)'>"
-	       "<input type=password id=pw1 placeholder='Nueva contraseña' maxlength=32>"
-	       "<input type=password id=pw2 placeholder='Repítela' maxlength=32>"
-	       "<button>Guardar contraseña</button> "
-	       "<button type=button onclick=nopw()>Quitar contraseña</button></form>"
-	       "<p><small>De 1 a 32 caracteres: letras sin acento, números y símbolos, sin espacios "
-	       "ni #. Se guarda en boot.conf y vale desde ya: el navegador la pedirá.</small></p>";
 
 	H += "<script>const DIR=" + std::string ("'") + JsString (Dir) + "';"
 	     "const log=t=>document.getElementById('log').textContent+=t+'\\n';"
@@ -312,12 +285,6 @@ std::string Page (const std::string &Dir)
 	     "if(await post('/rename?path='+p,{name:m}))location.reload()}"
 	     "async function mov(p,n){const d=prompt('Mover '+n+' a la carpeta (por ejemplo /dos/JUEGOS):',DIR);"
 	     "if(!d||d==DIR)return;if(await post('/move?path='+p,{to:d}))location.reload()}"
-	     "async function setpw(e){e.preventDefault();const a=document.getElementById('pw1').value,"
-	     "b=document.getElementById('pw2').value;if(a!=b){alert('Las dos no coinciden.');return false}"
-	     "if(!/^[!-~]{1,32}$/.test(a)||a.includes('#')){alert('De 1 a 32 caracteres, sin espacios, acentos ni #.');return false}"
-	     "if(await post('/password',{new:a})){alert('Guardada. El navegador te la pedirá ahora.');location.reload()}return false}"
-	     "async function nopw(){if(!confirm('¿Quitar la contraseña? Cualquiera en tu red podrá entrar.'))return;"
-	     "if(await post('/password',{new:''}))location.reload()}"
 	     "</script></main></body></html>";
 	return H;
 }
@@ -490,30 +457,12 @@ void Handle (CSocket *pSocket)
 		Respond (pSocket, bOk ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
 			 bOk ? "ok" : "No se pudo escribir " + Path);
 	}
-	else if (R.Method == "POST" && (R.Path == "/rename" || R.Path == "/move" || R.Path == "/password"))
+	else if (R.Method == "POST" && (R.Path == "/rename" || R.Path == "/move"))
 	{
 		std::string Form;
 		if (!ReadSmallBody (pSocket, Body, nLength, &Form))
 		{
 			Respond (pSocket, "400 Bad Request", "text/plain; charset=utf-8", "Formulario no válido");
-			return;
-		}
-
-		if (R.Path == "/password")
-		{
-			const std::string New = bareweb::QueryParam (Form, "new");
-			if (!New.empty () && !bareweb::ValidPassword (New))
-			{
-				Respond (pSocket, "400 Bad Request", "text/plain; charset=utf-8",
-					 "De 1 a 32 caracteres, sin espacios, acentos ni #.");
-				return;
-			}
-			const bool bOk = SavePassword (New);
-			if (bOk) s_Password = New;		// from the next request on
-			CLogger::Get ()->Write (FromWeb, LogNotice, "password %s: %s",
-						New.empty () ? "removed" : "changed", bOk ? "ok" : "failed");
-			Respond (pSocket, bOk ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
-				 bOk ? "ok" : "No se pudo escribir boot.conf");
 			return;
 		}
 

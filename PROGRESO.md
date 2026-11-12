@@ -116,6 +116,13 @@ proyecto, igual en todos los kernels; ahora se añade el commit
    falla, el mensaje en pantalla / SD:/bmdos-error.txt dirá qué.
 Compilado; commit "dos: the restart survives..."; falta probar en placa.
 
+**Web (usuario, 12-nov): acciones arriba, y quitar el cambio de contraseña
+desde la web (quizá más adelante en una página de configuración web).**  Hecho
+("web: the actions on top..."): barra arriba (Subir ficheros, Subir carpeta,
+Nueva carpeta, zona de arrastre); fuera la sección de contraseña, su JS, la
+ruta /password y SavePassword.  La contraseña se pone en el menú o boot.conf.
+IDEA PARA MÁS ADELANTE: página de configuración web.
+
 ### Revisión completa del proyecto (pedida por el usuario, 12-nov)
 
 "Ahora que funciona y estamos afinando: revísalo y ve arreglando lo que veas;
