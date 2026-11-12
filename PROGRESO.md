@@ -261,6 +261,18 @@ dentro) contra el presupuesto de UN frame (14.3 ms) -> ve sobrecarga
 máquina cuando va por delante (prioritario), P2 governor midiendo por
 frontera (A1/A2).
 
+## Otros emuladores (valorado el 12-nov a petición del usuario; sin decisión)
+
+BM-DOS es un frontend libretro: cambiar de núcleo cuesta poco solo si el otro
+también es un core libretro.  DOSBox Pure lo es (Voodoo, Windows 9x, ZIP);
+DOSBox Staging, DOSBox-X y 86Box son aplicaciones SDL/Qt: port nuevo.  86Box
+además es emulación de bajo nivel: pide BIOS, DOS instalado en imagen de disco
+y mucha más CPU (su FAQ: ~700 puntos mono-hilo para un 486DX2/66).
+Recomendación dada: seguir con dosbox-core.  Dato útil: el código de Voodoo
+YA está en third_party/dosbox-core/src/hardware/voodoo*.cpp, excluido en el
+Makefile (WITH_VOODOO=0, "OpenGL"): mirar si su ruta por software compila
+(punto 23).
+
 ## Notas técnicas
 
 - Compilar: `export PATH=$PWD/opt/arm-gnu-toolchain-15.2.rel1-x86_64-aarch64-none-elf/bin:$PATH; make -j2 RASPPI=4`.
