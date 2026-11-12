@@ -133,6 +133,13 @@ cuentas salen del metrónomo  [x] pruebas PC  [x] compilar  [x] commit + bundle 
       con BareDiskInUse.  **PREGUNTA AL USUARIO pendiente:** activar
       FF_FS_LOCK (parche a Circle) para cubrir los ficheros abiertos por los
       juegos; coste: límite de ficheros abiertos a la vez (p. ej. 64).
+      **DECIDIDO (usuario, 12-nov): NO el bloqueo de FatFs (impediría a un
+      programa abrir dos veces para escribir el mismo fichero), SÍ consultar
+      la tabla de ficheros abiertos de DOSBox (Files[]) desde la web.**  Hecho en
+      el código: bare_dosfiles.cpp (BareDosFileOpen, con las banderas de DOSBox),
+      la web lo consulta junto a BareDiskInUse.  Compilado; commit "web: ...open files".
+      Probar en placa: con un juego guardando partida, intentar borrar su
+      fichero desde la web -> debe negarse con el motivo.
       Compilado y en el commit "review R3-R6: ...".  Falta la respuesta a la PREGUNTA.
 - [ ] R7. Governor y ritmo (P1/P2 de la hoja de ruta).
 - [ ] R8. CI, make-sd, parches, README.

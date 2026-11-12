@@ -409,6 +409,12 @@ boolean BareDiskAvailable (void);
 ///\t   (FF_FS_LOCK 0), and removing an open file can corrupt the volume.
 char    BareDiskInUse (const char *pCardPath);
 
+/// \brief The DOS drive of a file DOS has open that IS this card path, or lies
+///\t   inside this folder; 0 if none (bare_dosfiles.cpp, from DOSBox's own
+///\t   table of open files).  The web server checks it before deleting,
+///\t   renaming or moving.
+char    BareDosFileOpen (const char *pCardPath);
+
 /// \brief Take presentation back to core 0 (before anything else draws on
 ///\t   the screen, e.g. at shutdown).  Waits for core 2 to stop; leaves the
 ///\t   last picture on page 0.

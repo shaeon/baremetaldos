@@ -610,6 +610,7 @@ APP_SRCS := \
 
 # DOSBox-core's libretro platform layer: the parts we keep.
 DOSBOX_PLATFORM_SRCS := \
+	$(CURDIR)/src/platform/bare_dosfiles.cpp \
 	$(DOSBOX_DIR)/libretro/src/CoreOptionCategory.cpp \
 	$(DOSBOX_DIR)/libretro/src/CoreOptionDefinition.cpp \
 	$(DOSBOX_DIR)/libretro/src/CoreOptionValue.cpp \

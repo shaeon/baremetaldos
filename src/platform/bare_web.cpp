@@ -180,11 +180,24 @@ bool SavePassword (const std::string &Password)
 	return rename ("SD:/boot.conf.new", "SD:/boot.conf") == 0;
 }
 
-// Why a delete, rename or move is refused: a disk image DOS has in a drive.
-std::string InUse (char cDrive)
+// Why a delete, rename or move must be refused, or "" if it need not: a disk
+// image DOS has in a drive, or a file a DOS program has open - there or inside
+// this folder.  FatFs keeps no lock, and removing an open file can corrupt the
+// card (bare_dosfiles.cpp).
+std::string InUse (const std::string &Path)
 {
-	return std::string ("Está metido en la unidad ") + cDrive + ": de DOS (o lo está algo de "
-	       "dentro de esta carpeta). Sácalo antes en el menú: Win+F12, Unidades.";
+	if (const char cDrive = BareDiskInUse (Path.c_str ()))
+	{
+		return std::string ("Está metido en la unidad ") + cDrive + ": de DOS (o lo está algo "
+		       "de dentro de esta carpeta). Sácalo antes en el menú: Win+F12, Unidades.";
+	}
+	if (const char cDrive = BareDosFileOpen (Path.c_str ()))
+	{
+		return std::string ("Un programa de DOS lo tiene abierto (o algo de dentro de esta "
+		       "carpeta), en la unidad ") + cDrive + ":. Sal de ese programa en DOS y vuelve "
+		       "a intentarlo.";
+	}
+	return "";
 }
 
 std::string FreeSpace (void)
@@ -510,9 +523,9 @@ void Handle (CSocket *pSocket)
 			return;
 		}
 
-		if (const char cDrive = BareDiskInUse (Path.c_str ()))
+		if (const std::string Why = InUse (Path); !Why.empty ())
 		{
-			Respond (pSocket, "409 Conflict", "text/plain; charset=utf-8", InUse (cDrive));
+			Respond (pSocket, "409 Conflict", "text/plain; charset=utf-8", Why);
 			return;
 		}
 
@@ -577,9 +590,9 @@ void Handle (CSocket *pSocket)
 	}
 	else if (R.Method == "POST" && R.Path == "/delete" && Path != "/")
 	{
-		if (const char cDrive = BareDiskInUse (Path.c_str ()))
+		if (const std::string Why = InUse (Path); !Why.empty ())
 		{
-			Respond (pSocket, "409 Conflict", "text/plain; charset=utf-8", InUse (cDrive));
+			Respond (pSocket, "409 Conflict", "text/plain; charset=utf-8", Why);
 			return;
 		}
 		const bool bOk = RemoveTree (Path);
