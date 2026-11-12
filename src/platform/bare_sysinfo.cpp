@@ -414,6 +414,13 @@ const char *s_pLastReason = "";
 u64 s_nLastChangeMicros = 0;
 unsigned s_nLoadPermille = 0;		// work / budget, smoothed (1000 = all of it)
 
+// Rising early (governor_policy.h): until when a program that just started is
+// kept at the top, until when no step down follows an audio gap, and when the
+// machine last resumed (menu, pause, DOS restart), for the gaps' grace time.
+u64 s_nWarmUntil = 0;
+u64 s_nNoDownUntil = 0;
+u64 s_nResumedMicros = 0;
+
 boolean SetLevel (unsigned nTo, const char *pReason)
 {
 	if (nTo >= s_nLevels || nTo == s_nLevel)
@@ -878,7 +885,8 @@ void BareSysInfoGovernorTick (unsigned nFrameMicros, unsigned nBudgetMicros,
 		{
 			s_nOverrunFrames = 0;   // a picture that has not changed in 10 s is not work
 
-			if (s_nLevel > 0 && NowMicros () - s_nLevelSince >= IdleStepMicros)
+			if (s_nLevel > 0 && NowMicros () - s_nLevelSince >= IdleStepMicros
+			    && governor::MayStepDown (NowMicros (), s_nWarmUntil, s_nNoDownUntil))
 			{
 				SetLevel (s_nLevel - 1, "pantalla quieta");
 			}
@@ -891,7 +899,8 @@ void BareSysInfoGovernorTick (unsigned nFrameMicros, unsigned nBudgetMicros,
 
 	if (s_bCLIActive)
 	{
-		if (s_nLevel > 0 && NowMicros () - s_nLevelSince >= IdleStepMicros)
+		if (s_nLevel > 0 && NowMicros () - s_nLevelSince >= IdleStepMicros
+		    && governor::MayStepDown (NowMicros (), s_nWarmUntil, s_nNoDownUntil))
 		{
 			SetLevel (s_nLevel - 1, "prompt de DOS");
 		}
@@ -1040,7 +1049,8 @@ void BareSysInfoGovernorTick (unsigned nFrameMicros, unsigned nBudgetMicros,
 		// right at the budget (a 70 Hz text screen on the interpreter): it
 		// never looks "comfortable" and it never overruns either, and that
 		// used to be a permanent reason to stay at the top.
-		if (bComfortable || (bNotOverrunning && nElapsed >= StepDownIdleMicros))
+		if ((bComfortable || (bNotOverrunning && nElapsed >= StepDownIdleMicros))
+		    && governor::MayStepDown (NowMicros (), s_nWarmUntil, s_nNoDownUntil))
 		{
 			SetLevel (s_nLevel - 1, "va holgado");
 		}
@@ -1233,4 +1243,49 @@ void BareSysInfoGovernorStats (TBareGovernorStats *pStats)
 		pStats->nMHz[i] = static_cast<unsigned> (s_Levels[i].nHz / 1000000);
 		pStats->nPercentAt[i] = nTotal != 0 ? static_cast<unsigned> (Shares[i] * 100 / nTotal) : 0;
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Rising early (item 3 of the list; the rules are governor_policy.h's)
+// ---------------------------------------------------------------------------
+
+void BareSysInfoGovernorProgramStart (void)
+{
+	if (!s_bGovernorReady || s_nPinned != 0)
+	{
+		return;
+	}
+	const u64 nNow = NowMicros ();
+	s_nWarmUntil = nNow + governor::WarmupMicros;
+	const bool bHot = s_nTemperature != 0 && s_nTemperature >= s_nVetoCelsius;
+	if (!bHot && s_nLevel + 1 < s_nLevels)
+	{
+		SetLevel (s_nLevels - 1, "programa arrancado");
+	}
+}
+
+void BareSysInfoGovernorAudioGap (void)
+{
+	if (!s_bGovernorReady)
+	{
+		return;
+	}
+	const u64 nNow = NowMicros ();
+	const u64 nSinceResume = s_nResumedMicros != 0 ? nNow - s_nResumedMicros : ~0ull;
+	if (nSinceResume < governor::GapGraceMicros)
+	{
+		return;				// an empty queue after a pause is not load
+	}
+	s_nNoDownUntil = nNow + governor::NoDownAfterGapMicros;
+	const bool bHot = s_nTemperature != 0 && s_nTemperature >= s_nVetoCelsius;
+	if (!bHot && governor::GapStepsUp (s_nPinned != 0, s_nLevel, s_nLevels - 1,
+					   nNow - s_nLevelSince, nSinceResume))
+	{
+		SetLevel (s_nLevel + 1, "huecos de audio");
+	}
+}
+
+void BareSysInfoGovernorResumed (void)
+{
+	s_nResumedMicros = NowMicros ();
 }

@@ -58,6 +58,16 @@ llamada)  [x] contadores en bare_sysinfo (SetLevel con motivo; subidas,
 bajadas, tiempo por nivel, carga media)  [x] mostrarlos en Rendimiento
 [x] pruebas PC  [x] compilar  [x] commit + bundle ("governor: work per emulated frame...").
 
+**Punto 3 (governor sube antes: huecos de audio + calentamiento al arrancar un
+programa) - HECHO, pendiente de probar en placa.**  Pasos: [x] ver detección del prompt
+(no la hay: "CLI" es "sin imagen 1 s") y contador de huecos  [x] diseño:
+PSP de DOS (bare_dosfiles.cpp) para el arranque de programas; 10 s arriba;
+hueco -> +1 nivel (cada 0,5 s), 15 s sin bajar; 2 s de gracia tras menú /
+pausa / reinicio; temperatura manda  [x] política + 11 pruebas (check-governor)
+[x] kernel  [x] compilar  [x] commit + bundle ("governor: rise early...").
+Limitación conocida: si el autoexec lanza un juego al arrancar, el primer PSP
+visto puede ser el del juego (no hay calentamiento ese primer arranque).
+
 ### Revisión completa del proyecto (pedida por el usuario, 12-nov)
 
 "Ahora que funciona y estamos afinando: revísalo y ve arreglando lo que veas;

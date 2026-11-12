@@ -1960,7 +1960,9 @@ void BuildPages (void)
 			Info ("Último cambio", Gov.pLastReason != nullptr && Gov.pLastReason[0] != '\0'
 					 ? std::string (Gov.pLastReason) : std::string ("ninguno todavía"),
 			      "Por qué cambió el reloj la última vez: no llega, va holgado, pantalla "
-			      "quieta, prompt de DOS, temperatura o el modo fijo."),
+			      "quieta, prompt de DOS, temperatura, el modo fijo, programa arrancado "
+			      "(10 s en el máximo al empezar un programa) o huecos de audio (el "
+			      "sonido se quedó sin datos: sube un nivel al momento)."),
 			Info ("  hace", Gov.pLastReason != nullptr && Gov.pLastReason[0] != '\0'
 					? Format ("%u:%02u:%02u", Gov.nSecondsSinceChange / 3600,
 						  Gov.nSecondsSinceChange / 60 % 60, Gov.nSecondsSinceChange % 60)

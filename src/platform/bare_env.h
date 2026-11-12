@@ -415,6 +415,10 @@ char    BareDiskInUse (const char *pCardPath);
 ///\t   renaming or moving.
 char    BareDosFileOpen (const char *pCardPath);
 
+/// \brief DOS's current PSP (the running program's segment); it changes when a
+///\t   program starts or ends (bare_dosfiles.cpp).
+unsigned BareDosCurrentPsp (void);
+
 /// \brief Take presentation back to core 0 (before anything else draws on
 ///\t   the screen, e.g. at shutdown).  Waits for core 2 to stop; leaves the
 ///\t   last picture on page 0.
@@ -682,6 +686,14 @@ struct TBareGovernorStats
 	unsigned nLoadPercent;		///< work per emulated frame / its budget, smoothed
 };
 void BareSysInfoGovernorStats (TBareGovernorStats *pStats);
+
+/// \brief Rising early (governor_policy.h): a DOS program has just started -
+///\t   the top clock for a few seconds; the sound ran dry - one level up
+///\t   now, no stepping down for a while; the machine resumed (menu, pause,
+///\t   DOS restart) - ignore the gaps of the next 2 s.  Core 0.
+void BareSysInfoGovernorProgramStart (void);
+void BareSysInfoGovernorAudioGap (void);
+void BareSysInfoGovernorResumed (void);
 
 /// \brief Cap the top governor level, from boot.conf (0 = no cap).
 void BareSysInfoSetCPUMax (unsigned nMHz);

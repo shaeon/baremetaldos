@@ -184,6 +184,52 @@ constexpr const char *Label (bool bIdle, bool bAtTop, TVerdict Verdict)
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Rising early (item 3 of the list)
+// ---------------------------------------------------------------------------
+//
+// The frame-time rules react after the fact: a few frames over budget, or 3 s
+// of it.  Two earlier signals:
+//
+//   * A program starts (DOS's current PSP changes to one that is not the
+//     shell's): its first seconds - unpacking, loading, a DOS extender, the
+//     intro - are the heaviest.  Go to the top at once and stay there for
+//     WarmupMicros.
+//   * The sound output ran dry (an audio gap: a click you hear).  That is the
+//     emulator already late, not about to be: one level up at once, and no
+//     stepping down for a while.  Not right after a pause, the menu or a DOS
+//     restart, when the queue is empty for reasons that are not load.
+//
+// The temperature veto overrides all of it, as it overrides everything else.
+
+constexpr unsigned long long WarmupMicros = 10000000;		// 10 s at the top
+constexpr unsigned long long GapGraceMicros = 2000000;		// after a resume
+constexpr unsigned long long GapStepMicros = 500000;		// between gap steps
+constexpr unsigned long long NoDownAfterGapMicros = 15000000;	// 15 s
+
+/// May the governor step DOWN now (for comfort or idle)?  Not while a program
+/// warms up, nor soon after an audio gap.
+constexpr bool MayStepDown (unsigned long long nNow, unsigned long long nWarmUntil,
+			    unsigned long long nNoDownUntil)
+{
+	return nNow >= nWarmUntil && nNow >= nNoDownUntil;
+}
+
+/// Should an audio gap raise the clock one level now?
+constexpr bool GapStepsUp (bool bPinned, unsigned nLevel, unsigned nTop,
+			   unsigned long long nSinceLevelChange, unsigned long long nSinceResume)
+{
+	return !bPinned && nLevel < nTop && nSinceLevelChange >= GapStepMicros
+	       && nSinceResume >= GapGraceMicros;
+}
+
+/// Is this PSP a program starting?  nHome is the shell's (the first PSP seen);
+/// going back to it is a program ending, not one starting.
+constexpr bool ProgramStarted (unsigned nLastPsp, unsigned nPsp, unsigned nHome)
+{
+	return nPsp != 0 && nPsp != nLastPsp && nPsp != nHome;
+}
+
 } // namespace governor
 
 #endif // BM_DOS_GOVERNOR_POLICY_H

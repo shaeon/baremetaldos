@@ -95,3 +95,11 @@ char BareDosFileOpen (const char *pCardPath)
 	}
 	return 0;
 }
+
+/// DOS's current PSP: the segment of the program running now.  It changes when
+/// a program starts and when it ends (back to the shell's); the governor warms
+/// up on a start.  0 before DOS exists.
+unsigned BareDosCurrentPsp (void)
+{
+	return dos.psp ();
+}

@@ -288,6 +288,22 @@ int main (void)
 			"idle manda: sin frames no se justifica ningun reloj");
 	}
 
+	{
+		// Punto 3: subir antes.
+		using namespace governor;
+		Expect (!MayStepDown (5000000, 10000000, 0), "calentando (programa recien arrancado): no baja");
+		Expect (!MayStepDown (20000000, 0, 30000000), "poco despues de un hueco de audio: no baja");
+		Expect (MayStepDown (40000000, 10000000, 30000000), "pasados los dos plazos: puede bajar");
+		Expect (GapStepsUp (false, 0, 1, 1000000, 5000000), "un hueco por debajo del maximo: sube");
+		Expect (!GapStepsUp (false, 1, 1, 1000000, 5000000), "en el maximo ya no hay donde subir");
+		Expect (!GapStepsUp (true, 0, 1, 1000000, 5000000), "modo fijo (Maximo/Ahorro): no se toca");
+		Expect (!GapStepsUp (false, 0, 1, 100000, 5000000), "dos huecos seguidos: un nivel cada medio segundo");
+		Expect (!GapStepsUp (false, 0, 1, 1000000, 500000), "recien salido del menu o de una pausa: no cuenta");
+		Expect (ProgramStarted (0x1000, 0x2000, 0x1000), "PSP nuevo: arranca un programa");
+		Expect (!ProgramStarted (0x2000, 0x1000, 0x1000), "volver al PSP del interprete: termina, no arranca");
+		Expect (!ProgramStarted (0x2000, 0x2000, 0x1000), "el mismo PSP: nada");
+	}
+
 	printf ("\n");
 	if (s_nFailures != 0)
 	{

@@ -33,6 +33,7 @@
 #include <cstdio>
 #include "platform/bare_env.h"
 #include "platform/bare_storage.h"
+#include "platform/governor_policy.h"
 #include "platform/pace_policy.h"
 
 #include <circle/logger.h>
@@ -62,6 +63,11 @@ static constexpr unsigned MixerRate = 44100;
 //                  knows whether it has a screen to write to.
 //
 // The base class ("dosbox") is what names the kernel in the Circle log.
+// DOS's PSP as last seen, and the shell's (the first one seen after DOS
+// starts), for the governor's warm-up on a program start (Run).
+static unsigned s_nLastPsp = 0;
+static unsigned s_nHomePsp = 0;
+
 CKernel::CKernel (void)
 :	CStdlibAppStdio ("dosbox"),
 	m_nBootLogLevel (2),
@@ -1297,6 +1303,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 			CTimer::SimpleMsDelay (15);
 
 			nRefStart = BareMicros ();
+			BareSysInfoGovernorResumed ();	// audio gaps right after this are not load
 			nFrameIndex = 0;
 
 			continue;
@@ -1310,6 +1317,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 			// during the pause, so the frame index must not bill it for
 			// the wall-clock time that passed.
 			nRefStart = BareMicros ();
+			BareSysInfoGovernorResumed ();	// audio gaps right after this are not load
 			nFrameIndex = 0;
 
 			continue;
@@ -1384,6 +1392,8 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 				BareCoreRequestReboot ();
 			}
 			nRefStart = BareMicros ();
+			BareSysInfoGovernorResumed ();	// audio gaps right after this are not load
+			s_nHomePsp = s_nLastPsp = 0;		// a new shell, a new PSP
 			nFrameIndex = 0;
 			continue;
 		}
@@ -1637,6 +1647,37 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		// panel hidden - the default - the setup menu showed 0 MHz and 0 °C
 		// and the governor's temperature veto had no temperature to act on.
 		BareSysInfoRefresh ();
+
+		// Rising early (item 3; governor_policy.h).  A program starting -
+		// DOS's current PSP changing to one that is not the shell's - sends
+		// the governor to the top for a few seconds; an audio gap (the sound
+		// ran dry: the emulator is already late) raises it a level at once.
+		{
+			static u64 s_nPspCheckMicros = 0;
+			const u64 nNow = BareMicros ();
+			if (nNow - s_nPspCheckMicros >= 250000)
+			{
+				s_nPspCheckMicros = nNow;
+				const unsigned nPsp = BareDosCurrentPsp ();
+				if (s_nHomePsp == 0)
+				{
+					s_nHomePsp = nPsp;	// the first seen: the shell's
+				}
+				else if (governor::ProgramStarted (s_nLastPsp, nPsp, s_nHomePsp))
+				{
+					BareSysInfoGovernorProgramStart ();
+				}
+				s_nLastPsp = nPsp;
+			}
+
+			static u64 s_nGovernorGaps = 0;
+			const u64 nGapsNow = BareAudioGaps ();
+			if (nGapsNow != s_nGovernorGaps)
+			{
+				s_nGovernorGaps = nGapsNow;
+				BareSysInfoGovernorAudioGap ();
+			}
+		}
 
 		BareSysInfoGovernorTick (static_cast<unsigned> (nWorkMicros),
 					 bRateKnown
