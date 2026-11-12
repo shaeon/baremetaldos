@@ -140,8 +140,9 @@ cuentas salen del metrónomo  [x] pruebas PC  [x] compilar  [x] commit + bundle 
       la web lo consulta junto a BareDiskInUse.  Compilado; commit "web: ...open files".
       Probar en placa: con un juego guardando partida, intentar borrar su
       fichero desde la web -> debe negarse con el motivo.
-      Compilado y en el commit "review R3-R6: ...".  Falta la respuesta a la PREGUNTA.
-- [ ] R7. Governor y ritmo (P1/P2 de la hoja de ruta).
+      Compilado y en el commit "review R3-R6: ...".  Pregunta respondida (ver arriba).
+- [x] R7. Governor y ritmo: hecho con los puntos 1 (metrónomo) y 2 (governor
+      por fotograma).
 - [ ] R8. CI, make-sd, parches, README.
 
 ## Pendiente
