@@ -241,7 +241,12 @@ B. Perfilador por partes del frame en el núcleo 0.
 C. Compilación: -O3 y LTO en DOSBox-core (medir).
 D. Ajustes de DOSBox en el menú: oplemu, frecuencia del mezclador, ciclos
    automáticos.
-E. No copiar el frame (si el core lo admite).
+E. No copiar el frame: DESCARTADO (12-nov), a petición del usuario se midió:
+   el perfilador da "Vídeo 0,4 %" del núcleo 0 (BareVideoPresent entero, copia
+   incluida; ~3 % como mucho con la pantalla entera cambiando a 70 fps), y
+   dosbox-core no admite GET_CURRENT_SOFTWARE_FRAMEBUFFER: evitar la copia
+   obligaría a tocar el render de DOSBox o a que el núcleo 2 lea el búfer de
+   DOSBox mientras se escribe (desgarros).  No compensa.
 F. OPL en el núcleo 3 (solo si B lo justifica).
 
 Lectura del panel del usuario (12-nov, escena de créditos, Pi 4):
