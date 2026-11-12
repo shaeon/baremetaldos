@@ -213,6 +213,7 @@ struct TInput
 	bool bHidden = false;		// shown as '*' (Tab toggles)
 	unsigned nMax = 63;		// characters
 	unsigned nMin = 0;		// Enter does nothing below this
+	std::string Note;		// a line under the field (the keyboard layout)
 };
 
 // A question in a box over the page, as a BIOS asks "Save to CMOS and EXIT
@@ -262,9 +263,12 @@ public:
 	void OpenInput (int nId, const std::string &Title, const std::string &Prompt,
 			const std::string &Initial, bool bHidden, unsigned nMin, unsigned nMax)
 	{
-		m_Input = TInput { nId, Title, Prompt, Initial, bHidden, nMax, nMin };
+		m_Input = TInput { nId, Title, Prompt, Initial, bHidden, nMax, nMin, "" };
 		m_bInput = true;
 	}
+
+	/// A line under an open input box's field.
+	void SetInputNote (const std::string &Note) { m_Input.Note = Note; }
 
 	bool InputOpen (void) const { return m_bInput; }
 
@@ -515,7 +519,7 @@ private:
 
 	void RenderInput (CScreen &S) const
 	{
-		const unsigned w = 64, h = 9;
+		const unsigned w = 64, h = 10;
 		const unsigned x = (Cols - w) / 2, y = (Rows - h) / 2;
 
 		S.Fill (x + 1, y + 1, w, h, Black, Black);		// shadow
@@ -551,7 +555,8 @@ private:
 		const unsigned n = S.Put (x + 3, y + 4, Shown, Black, LightGrey, nField);
 		S.Put (x + 3 + n, y + 4, "_", Blue, LightGrey);
 
-		S.Put (x + 2, y + 6, Format2 (m_Input), LightCyan, Blue, w - 4);
+		S.Put (x + 3, y + 5, m_Input.Note, LightGrey, Blue, w - 6);
+		S.Put (x + 2, y + 7, Format2 (m_Input), LightCyan, Blue, w - 4);
 	}
 
 	static std::string Format2 (const TInput &In)

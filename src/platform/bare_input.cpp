@@ -31,6 +31,7 @@
 // (at your option) any later version.
 //
 #include "bare_env.h"
+#include "key_report.h"
 
 #include "libretro.h"
 
@@ -107,7 +108,11 @@ const TKeyMap s_KeyMap[] =
 	{ 0x33, RETROK_SEMICOLON },	{ 0x34, RETROK_QUOTE },
 	{ 0x35, RETROK_BACKQUOTE },	{ 0x36, RETROK_COMMA },
 	{ 0x37, RETROK_PERIOD },	{ 0x38, RETROK_SLASH },
-	{ 0x32, RETROK_UNKNOWN },	// "non-US #", nearest DOS key is '\', see below
+	// The ISO key next to Enter ("non-US #"): 'ç' on a Spanish keyboard, '#'
+	// on a UK one.  A PC keyboard sends the same scan code for it as for the
+	// US backslash key (0x2B), and KEYB turns that into the right character.
+	// It was RETROK_UNKNOWN: the key did nothing, in DOS or in the menu.
+	{ 0x32, RETROK_BACKSLASH },
 	{ 0x64, RETROK_OEM_102 },	// the extra key on ISO keyboards
 
 	// Caps Lock.  Missing until now, and it is the one key the core maps to
@@ -258,63 +263,47 @@ void FlushLEDUpdates (void)
 
 void KeyStatusHandler (unsigned char ucModifiers, const unsigned char RawKeys[6])
 {
-	// Releases first: compare the previous report with this one.
-	for (unsigned i = 0; i < 6; i++)
-	{
-		const u8 ucOld = s_LastKeys[i];
-		if (ucOld == 0)
+	// Only what CHANGED since the last report (key_report.h): a key that is
+	// still held is not pressed again.  It used to be, in every report - so
+	// typing "as" with the 'a' still down when the 's' arrived gave "aas", in
+	// DOS and in the setup menu, and Caps Lock held while another key moved
+	// flipped its LED once more.
+	barekeys::Diff (s_LastKeys, RawKeys,
+		[] (unsigned char ucUsage)
 		{
-			continue;
-		}
+			BareDeliverKey (UsageToRetro (ucUsage), FALSE);
+		},
+		[] (unsigned char ucUsage)
+		{
+			const unsigned nRetroKey = UsageToRetro (ucUsage);
+			BareDeliverKey (nRetroKey, TRUE);
 
-		boolean bStillDown = FALSE;
-		for (unsigned j = 0; j < 6; j++)
-		{
-			if (RawKeys[j] == ucOld)
+			// The LEDs follow the lock keys.  Circle's cooked mode does
+			// this itself; raw mode (which is what gives DOS make and
+			// break codes) leaves it to us.  Queued, not written here:
+			// see s_nLEDUpdatesPending.
+			if (nRetroKey == RETROK_CAPSLOCK)
 			{
-				bStillDown = TRUE;
-				break;
+				ToggleLED (LEDCapsLock);
 			}
-		}
+			else if (nRetroKey == RETROK_NUMLOCK)
+			{
+				ToggleLED (LEDNumLock);
+			}
+			else if (nRetroKey == RETROK_SCROLLOCK)
+			{
+				ToggleLED (LEDScrollLock);
+			}
+		});
 
-		if (!bStillDown)
-		{
-			BareDeliverKey (UsageToRetro (ucOld), FALSE);
-		}
-	}
-
-	// Then presses.
-	for (unsigned i = 0; i < 6; i++)
+	// A rollover error report (too many keys) is not a new state: keep the
+	// last real one, so that those keys are not "pressed" again after it.
+	if (!(RawKeys[0] >= 1 && RawKeys[0] <= 3))
 	{
-		const u8 ucNew = RawKeys[i];
-		if (ucNew == 0)
+		for (unsigned i = 0; i < 6; i++)
 		{
-			continue;
+			s_LastKeys[i] = RawKeys[i];
 		}
-
-		const unsigned nRetroKey = UsageToRetro (ucNew);
-		BareDeliverKey (nRetroKey, TRUE);
-
-		// Caps Lock toggles on the press, and the emulated BIOS needs the
-		// *release* as well to compute its own flag - which is why both
-		// edges are delivered and only the host LED is toggled here.
-		if (nRetroKey == RETROK_CAPSLOCK)
-		{
-			ToggleLED (LEDCapsLock);
-		}
-		else if (nRetroKey == RETROK_NUMLOCK)
-		{
-			ToggleLED (LEDNumLock);
-		}
-		else if (nRetroKey == RETROK_SCROLLOCK)
-		{
-			ToggleLED (LEDScrollLock);
-		}
-	}
-
-	for (unsigned i = 0; i < 6; i++)
-	{
-		s_LastKeys[i] = RawKeys[i];
 	}
 
 	s_ucModifiers = ucModifiers;
@@ -879,4 +868,10 @@ void BareInputSetMouseSpeed (unsigned nPercent)
 {
 	s_nMouseSpeed = nPercent < 25 ? 25 : nPercent > 400 ? 400 : nPercent;
 	s_nMouseRestX = s_nMouseRestY = 0;
+}
+
+boolean BareInputCapsLock (void)
+{
+	// The LED state is the lock state: both are toggled by the same key press.
+	return (s_ucLEDState & LEDCapsLock) != 0 ? TRUE : FALSE;
 }

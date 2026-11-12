@@ -198,8 +198,19 @@ std::string s_WiFiSSID;			// the network being joined
 bool s_bWiFiSecure = true;
 
 // Modifier keys, for typing (menu_keymap.h): Shift and AltGr (right Alt).
-bool s_bShift = false;
-bool s_bAltGr = false;
+// Each key on its own.  The keyboard handler delivers all eight modifiers
+// whenever one changes (left ones first, then right ones), so one flag for
+// "Shift" was set by "left Shift down" and cleared at once by the "right Shift
+// up" that follows it: the left Shift never worked in a text box.
+bool s_bLeftShift = false;
+bool s_bRightShift = false;
+bool s_bRightAlt = false;
+bool s_bModeKey = false;
+
+// The layout of the keyboard on the desk: cmdline.txt's keymap= (what Circle
+// is told the keyboard is), read when the menu opens; without one, the DOS
+// layout (KEYB) is the best guess.
+baremenu::TLayout s_Layout = baremenu::TLayout::US;
 
 // --- settings: what the menu can change, and where it is kept ------------------------
 //
@@ -1091,7 +1102,7 @@ bool SaveSettings (void)
 	{
 		if (S.nPending == S.nSaved) continue;
 		if (S.nId == SetDisplay) { bCmdline = true; bBoot = true; }
-
+		else if (S.nId == SetWiFiCountry) continue;	// wpa_supplicant.conf, below
 		else if (S.File == FileCmdline) bCmdline = true;
 		else if (S.File == FileBoot) bBoot = true;
 		else if (S.File == FileDOSBox) bDOSBox = true;
@@ -1104,6 +1115,42 @@ bool SaveSettings (void)
 	if (s_WebPassPending != s_WebPassSaved)
 	{
 		bBoot = true;
+	}
+
+	// The WiFi country lives in wpa_supplicant.conf, which is otherwise written
+	// only when a network is chosen: changed on its own, it used to be marked
+	// saved and written nowhere.  Its line is changed in place (or added at the
+	// top); the rest of the file, network and password included, is untouched.
+	if (const TSetting *pCountry = FindSetting (SetWiFiCountry);
+	    pCountry != nullptr && pCountry->nPending != pCountry->nSaved)
+	{
+		std::string Text;
+		if (ReadText ("SD:/wpa_supplicant.conf", &Text))
+		{
+			const std::string &Code = pCountry->Choices[pCountry->nPending].Value;
+			size_t n = 0;
+			bool bDone = false;
+			while (n < Text.size () && !bDone)
+			{
+				size_t e = Text.find ('\n', n);
+				if (e == std::string::npos) e = Text.size ();
+				size_t a = n;
+				while (a < e && (Text[a] == ' ' || Text[a] == '\t')) a++;
+				if (Text.compare (a, 8, "country=") == 0)
+				{
+					size_t v = a + 8, w = v;
+					while (w < e && Text[w] != '\r' && Text[w] != ' ' && Text[w] != '\t') w++;
+					Text.replace (v, w - v, Code);
+					bDone = true;
+				}
+				n = e + 1;
+			}
+			if (!bDone)
+			{
+				Text = "country=" + Code + "\n" + Text;
+			}
+			bOk = WriteText ("SD:/wpa_supplicant.conf", Text) && bOk;
+		}
 	}
 
 	if (bCmdline)
@@ -1420,9 +1467,16 @@ constexpr unsigned PageIndexRed = 7;		// ..., Rendimiento, Red, Arranque, Salir
 
 bool WiFiTextOk (const std::string &Text)
 {
-	// wpa_supplicant's quoted strings: no quote, no line end, no backslash
-	// games.  Everything else (spaces, accents, symbols) is fine.
-	return Text.find_first_of ("\"\\\r\n") == std::string::npos;
+	// wpa_supplicant reads ssid="..." and psk="..." up to the LAST quote of the
+	// line (config.c, wpa_config_parse_string: os_strrchr), with no escapes: a
+	// quote or a backslash inside is taken as it is.  Only a line end cannot
+	// be there.  (This refused quotes and backslashes; on a Spanish keyboard
+	// Shift+2 is a quote.)
+	for (unsigned char c : Text)
+	{
+		if (c < 0x20 || c == 0x7F) return false;
+	}
+	return true;
 }
 
 bool WriteWiFiConfig (const std::string &SSID, const std::string &Password, bool bSecure)
@@ -1459,8 +1513,8 @@ void WiFiJoin (const std::string &Password)
 	if (!WiFiTextOk (s_WiFiSSID) || !WiFiTextOk (Password))
 	{
 		s_Menu.OpenDialog (DlgInfo, "No se puede guardar",
-				   "El nombre o la contraseña tienen comillas (\") o barras invertidas (\\), "
-				   "que wpa_supplicant.conf no admite así. Edítalo en el PC.", { "Aceptar" });
+				   "El nombre o la contraseña tienen un carácter de control, que "
+				   "wpa_supplicant.conf no admite.", { "Aceptar" });
 		return;
 	}
 	if (!WriteWiFiConfig (s_WiFiSSID, Password, s_bWiFiSecure))
@@ -2009,7 +2063,7 @@ bool MapKey (unsigned nRetroKey, TKey *pKey)
 bool Repeats (TKey Key)
 {
 	return Key == TKey::Up || Key == TKey::Down || Key == TKey::PageUp || Key == TKey::PageDown
-	       || Key == TKey::Plus || Key == TKey::Minus;
+	       || Key == TKey::Plus || Key == TKey::Minus || Key == TKey::Backspace;
 }
 
 void Close (void)
@@ -2167,6 +2221,19 @@ void HandleBrowse (int nId)
 	Insert (BrowseJoin (Entry.first), s_Browse == TBrowse::Floppy);
 }
 
+// A text box: what is typed is SHOWN (Tab hides it).  Typing a password blind
+// on a keyboard whose layout the menu has to be told is how wrong passwords
+// get saved; this is a setup screen at home, not a login.  The line under the
+// field says which layout the keys are read with.
+void OpenTextInput (int nId, const std::string &Title, const std::string &Prompt,
+		    const std::string &Initial, unsigned nMin, unsigned nMax)
+{
+	s_Menu.OpenInput (nId, Title, Prompt, Initial, false, nMin, nMax);
+	s_Menu.SetInputNote (s_Layout == TLayout::Spanish
+			     ? "Teclado: español (cmdline.txt keymap). AltGr+2 es @."
+			     : "Teclado: EE. UU. Para otro: keymap=es en cmdline.txt.");
+}
+
 void HandleWiFi (const TEvent &Ev)
 {
 	if (Ev.Kind == TEventKind::Close)
@@ -2185,7 +2252,7 @@ void HandleWiFi (const TEvent &Ev)
 	}
 	if (Ev.nId == ActWiFiManual)
 	{
-		s_Menu.OpenInput (InWiFiSSID, "Red WiFi", "Nombre de la red (SSID):", "", false, 1, 32);
+		OpenTextInput (InWiFiSSID, "Red WiFi", "Nombre de la red (SSID):", "", 1, 32);
 		return;
 	}
 	const size_t i = static_cast<size_t> (Ev.nId - ActWiFiEntry);
@@ -2194,8 +2261,8 @@ void HandleWiFi (const TEvent &Ev)
 	s_bWiFiSecure = s_WiFiNetworks[i].bSecure;
 	if (s_bWiFiSecure)
 	{
-		s_Menu.OpenInput (InWiFiPassword, "Contraseña", "Contraseña de \"" + s_WiFiSSID + "\":",
-				  "", true, 8, 63);
+		OpenTextInput (InWiFiPassword, "Contraseña", "Contraseña de \"" + s_WiFiSSID + "\":",
+			       "", 8, 63);
 	}
 	else
 	{
@@ -2213,9 +2280,9 @@ void HandleEvent (const TEvent &Ev)
 		{
 			s_WiFiSSID = Ev.Text;
 			s_bWiFiSecure = true;
-			s_Menu.OpenInput (InWiFiPassword, "Contraseña",
-					  "Contraseña de \"" + s_WiFiSSID + "\" (vacía si es abierta):",
-					  "", true, 0, 63);
+			OpenTextInput (InWiFiPassword, "Contraseña",
+				       "Contraseña de \"" + s_WiFiSSID + "\" (vacía si es abierta):",
+				       "", 0, 63);
 			return;
 		}
 		if (Ev.nId == InWebPassword)
@@ -2307,8 +2374,8 @@ void HandleEvent (const TEvent &Ev)
 			BrowseStart (TBrowse::FolderE, s_DriveE.Pending.empty () ? "/" : s_DriveE.Pending);
 			break;
 		case ActWebPassword:
-			s_Menu.OpenInput (InWebPassword, "Servidor web", "Contraseña (vacía: ninguna):",
-					  s_WebPassPending, true, 0, 32);
+			OpenTextInput (InWebPassword, "Servidor web", "Contraseña (vacía: ninguna):",
+				       s_WebPassPending, 0, 32);
 			break;
 		case ActWiFiList:
 			s_bWiFiList = true;
@@ -2547,6 +2614,24 @@ void BareMenuTick (void)
 		SetupTexts ();
 		DefineSettings ();
 		LoadSettings ();
+
+		// The keyboard for the text boxes: no key held, and its layout.
+		s_bLeftShift = s_bRightShift = s_bRightAlt = s_bModeKey = false;
+		{
+			std::string Cmdline, Map;
+			ReadText (CmdlinePath, &Cmdline);
+			if (bareconf::CmdlineGet (Cmdline, "keymap", &Map))
+			{
+				s_Layout = bareconf::Lower (Map) == "es" ? TLayout::Spanish : TLayout::US;
+			}
+			else
+			{
+				const TSetting *pKeyb = FindSetting (SetKeyb);
+				const std::string &Dos = pKeyb != nullptr ? pKeyb->Choices[pKeyb->nPending].Value : "";
+				s_Layout = Dos.rfind ("es", 0) == 0 || Dos.rfind ("la", 0) == 0
+					   ? TLayout::Spanish : TLayout::US;
+			}
+		}
 		BuildPages ();
 		UpdateTitle ();
 		s_nLastRefresh = nNow;
@@ -2565,27 +2650,23 @@ void BareMenuTick (void)
 		const TKeyEvent Ev = s_KeyRing[nTail % KeyRingSize];
 		s_nKeyTail.store (nTail + 1, std::memory_order_release);
 
-		// Modifiers, for typing in an input box.
-		if (Ev.nKey == RETROK_LSHIFT || Ev.nKey == RETROK_RSHIFT)
+		// Modifiers, for typing in an input box: each key keeps its own state.
+		switch (Ev.nKey)
 		{
-			s_bShift = Ev.bDown;
-			continue;
-		}
-		if (Ev.nKey == RETROK_RALT || Ev.nKey == RETROK_MODE)
-		{
-			s_bAltGr = Ev.bDown;
-			continue;
+		case RETROK_LSHIFT:	s_bLeftShift = Ev.bDown; continue;
+		case RETROK_RSHIFT:	s_bRightShift = Ev.bDown; continue;
+		case RETROK_RALT:	s_bRightAlt = Ev.bDown; continue;
+		case RETROK_MODE:	s_bModeKey = Ev.bDown; continue;
+		default:		break;
 		}
 
 		// An input box takes characters first; the keys that edit it
 		// (Backspace, Tab, Enter, Esc) go through the usual mapping below.
 		if (s_Menu.InputOpen () && Ev.bDown)
 		{
-			const TSetting *pKeyb = FindSetting (SetKeyb);
-			const std::string &Layout = pKeyb != nullptr ? pKeyb->Choices[pKeyb->nPending].Value : "";
-			const TLayout L = Layout.rfind ("es", 0) == 0 || Layout.rfind ("la", 0) == 0
-					  ? TLayout::Spanish : TLayout::US;
-			const std::uint32_t c = KeyToChar (Ev.nKey, s_bShift, s_bAltGr, L);
+			const std::uint32_t c = KeyToChar (Ev.nKey, s_bLeftShift || s_bRightShift,
+							   s_bRightAlt || s_bModeKey, s_Layout,
+							   BareInputCapsLock () != FALSE);
 			if (c != 0)
 			{
 				s_Menu.Char (c);

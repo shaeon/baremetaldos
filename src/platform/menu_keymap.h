@@ -26,7 +26,10 @@ namespace baremenu {
 enum class TLayout { US, Spanish };
 
 /// The character for a key, or 0 if it makes none (arrows, F-keys...).
-inline std::uint32_t KeyToChar (unsigned nKey, bool bShift, bool bAltGr, TLayout Layout)
+/// bCaps: Caps Lock is on.  It turns the letters round (and Shift turns them
+/// back), ñ and ç included; it does nothing to digits and symbols.
+inline std::uint32_t KeyToChar (unsigned nKey, bool bShift, bool bAltGr, TLayout Layout,
+				bool bCaps = false)
 {
 	// Letters: the same position in both layouts.
 	if (nKey >= RETROK_a && nKey <= RETROK_z)
@@ -35,7 +38,7 @@ inline std::uint32_t KeyToChar (unsigned nKey, bool bShift, bool bAltGr, TLayout
 		{
 			return Layout == TLayout::Spanish && nKey == RETROK_e ? 0x20AC : 0;	// €
 		}
-		return bShift ? nKey - RETROK_a + 'A' : nKey;
+		return (bShift != bCaps) ? nKey - RETROK_a + 'A' : nKey;
 	}
 
 	// The keypad: digits and operators whatever the layout (Num Lock assumed).
@@ -108,8 +111,8 @@ inline std::uint32_t KeyToChar (unsigned nKey, bool bShift, bool bAltGr, TLayout
 	case RETROK_EQUALS:	  return bShift ? 0xBF : 0xA1;		// ¿ ¡
 	case RETROK_LEFTBRACKET:  return bShift ? '^' : '`';
 	case RETROK_RIGHTBRACKET: return bShift ? '*' : '+';
-	case RETROK_BACKSLASH:	  return bShift ? 0xC7 : 0xE7;		// Ç ç
-	case RETROK_SEMICOLON:	  return bShift ? 0xD1 : 0xF1;		// Ñ ñ
+	case RETROK_BACKSLASH:	  return (bShift != bCaps) ? 0xC7 : 0xE7;	// Ç ç
+	case RETROK_SEMICOLON:	  return (bShift != bCaps) ? 0xD1 : 0xF1;	// Ñ ñ
 	case RETROK_QUOTE:	  return bShift ? 0xA8 : 0xB4;		// ¨ ´
 	case RETROK_COMMA:	  return bShift ? ';' : ',';
 	case RETROK_PERIOD:	  return bShift ? ':' : '.';

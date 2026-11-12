@@ -887,6 +887,9 @@ unsigned BareInputGamepads (void);
 /// \brief Mouse speed in percent, 25..400 (boot.conf mouse_speed, the menu).
 void    BareInputSetMouseSpeed (unsigned nPercent);
 
+/// \brief Caps Lock is on (the state the keyboard's LED shows).
+boolean BareInputCapsLock (void);
+
 /// \brief Current buttons, as a libretro RETRO_DEVICE_ID_JOYPAD_* bitmask.
 extern "C" u32 BareJoypadBits (void);
 

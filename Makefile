@@ -1353,6 +1353,15 @@ check-web:
 		-o build/web_util_test scripts/hostcheck/web_util_test.cpp
 	@build/web_util_test
 
+# What changed between two USB keyboard reports (key_report.h): a key still
+# held is not pressed again.
+.PHONY: check-keys
+check-keys:
+	@mkdir -p build
+	@$(HOST_CXX) -std=gnu++23 -O1 -Wall -Wextra -Wpedantic -Wshadow \
+		-o build/key_report_test scripts/hostcheck/key_report_test.cpp
+	@build/key_report_test
+
 # The setup menu's model and layout (menu_model.h): pages, cursor, keys, and
 # the 80x30 grid.
 .PHONY: check-menu
@@ -1449,7 +1458,7 @@ check-dynarec-hook:
 # config parser.  This is the target to run before a cross build.
 check-host: check-platform check-kernel check-bootconf check-scaling check-dynarec \
             check-coreopts check-resample check-storage check-governor check-portorder \
-            check-dynarec-hook check-midi check-frames check-audio check-scale check-menu check-conf check-web
+            check-dynarec-hook check-midi check-frames check-audio check-scale check-menu check-conf check-web check-keys
 print-srcs:
 	@echo $(ALL_SRCS)
 

@@ -34,6 +34,12 @@ int main (void)
 	       "the keypad types digits and operators");
 	Check (KeyToChar (RETROK_UP, false, false, ES) == 0 && KeyToChar (RETROK_F1, true, false, US) == 0,
 	       "arrows and F-keys make no character");
+	Check (KeyToChar (RETROK_a, false, false, ES, true) == 'A' && KeyToChar (RETROK_a, true, false, ES, true) == 'a'
+	       && KeyToChar (RETROK_SEMICOLON, false, false, ES, true) == 0xD1
+	       && KeyToChar (RETROK_1, false, false, ES, true) == '1',
+	       "Caps Lock turns letters round (Shift turns them back), ñ included, not digits");
+	Check (KeyToChar (RETROK_BACKSLASH, false, false, ES) == 0xE7 && KeyToChar (RETROK_BACKSLASH, false, true, ES) == '}',
+	       "the ç key (ISO key next to Enter, delivered as backslash): ç, and } with AltGr");
 	std::printf ("\n%u failures\n", s_nFailures);
 	return s_nFailures == 0 ? 0 : 1;
 }

@@ -56,14 +56,34 @@ están en local y en el bundle, pendientes de push.
 si hay dudas, pregunta antes."  Orden de trabajo; marcar cada casilla al
 terminarla y anotar debajo lo encontrado:
 
-- [ ] R1. **Teclado en el menú (fallos vistos por el usuario):** al escribir la
-      contraseña salen muchas letras, el Mayús izquierdo no funciona, y sospecha
-      que lo que se ve no es lo que se guarda.  Mirar: bare_input.cpp (cómo
-      llegan pulsaciones y modificadores), BareMenuKey / BareMenuTick
-      (bare_menu.cpp), menu_keymap.h (posiciones ISO: ç, º, <), escritura de
-      wpa_supplicant.conf y boot.conf.
-- [ ] R2. Menú: guardar/descartar/por defecto de cada pestaña contra los
-      ficheros reales (boot.conf, dosbox.conf, cmdline.txt).
+**Apartado (git stash, sin aprobar):** "WIP encontrado: P1/P2 metronomo de
+ritmo + governor por frame" - intento interrumpido de P1/P2 de la hoja de ruta
+(pace_policy.h, pace_test.cpp, cambios en bare_thread/kernel/bare_audio).  El
+usuario no llegó a aprobar P1.  Preguntarle; si dice que sí: `git stash pop`,
+revisar como código ajeno, `make check-pace`.
+
+- [x] R1. **Teclado en el menú** - hecho, compilado y en el commit "input: ...":
+      - "muchas letras": bare_input.cpp entregaba "pulsada" toda tecla presente
+        en cada informe USB (no solo las nuevas) -> key_report.h + check-keys.
+        Afectaba también a DOS.
+      - Mayús izquierdo: el manejador entrega los 8 modificadores en cada
+        cambio (izquierdos primero); el menú tenía un solo flag de Mayús y el
+        "derecho: suelto" borraba el "izquierdo: pulsado" -> un flag por tecla.
+      - tecla ç (ISO, uso USB 0x32) era RETROK_UNKNOWN: no hacía nada ni en DOS
+        -> RETROK_BACKSLASH (scancode 0x2B, lo que manda un PC).
+      - Bloq Mayús en el menú (BareInputCapsLock); Retroceso con repetición.
+      - distribución del menú: de cmdline.txt keymap= (teclado real), si no KEYB.
+      - la contraseña se VE al escribir (Tab la oculta) y una línea dice con
+        qué distribución se leen las teclas.
+      - WiFi: se rechazaban comillas y barras invertidas; wpa_supplicant lee
+        hasta la ÚLTIMA comilla (config.c os_strrchr) -> permitidas.
+- [~] R2. Menú: guardar/descartar/por defecto contra los ficheros reales.
+      Hecho: releído SaveSettings.  Encontrado y corregido: "País del WiFi"
+      cambiado sin elegir red se marcaba guardado y no se escribía (ahora
+      actualiza la línea country= de wpa_supplicant.conf).
+      FALTA: releer LoadSettings (valores a medida, nDefault), "Fijar la IP
+      actual", Discard/LoadDefaults con los ajustes en vivo, y probar en placa
+      cada pestaña (cambiar, F10, mirar el fichero en el PC).
 - [ ] R3. Arranque: orden, esperas, logo, SUPR, reinicio de DOS.
 - [ ] R4. Audio y MIDI: colas, descartes (drop), volumen, pruebas de sonido.
 - [ ] R5. Vídeo: presentador, menú encima, restaurar pantalla.
