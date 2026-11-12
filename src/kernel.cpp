@@ -33,6 +33,7 @@
 #include <cstdio>
 #include "platform/bare_env.h"
 #include "platform/bare_storage.h"
+#include "platform/pace_policy.h"
 
 #include <circle/logger.h>
 #include <circle/timer.h>
@@ -910,12 +911,14 @@ const char *BuildPanel (void)
 		pThrottle = " UNDER-VOLTAGE";
 	}
 
-	unsigned nFree = 0;
+	unsigned nQueuedNow = 0;	// frames waiting in the device's queue (Circle's
+					// GetQueueFramesAvail: "available to be sent" -
+					// this was called nFree, and read as free space)
 	unsigned nSize = 0;
 	u64 nQueued = 0;
 	u64 nDropped = 0;
 	u64 nSinceWrite = 0;
-	const unsigned bHasAudio = BareAudioQueueFrames (&nFree, &nSize);
+	const unsigned bHasAudio = BareAudioQueueFrames (&nQueuedNow, &nSize);
 	BareAudioStats (&nQueued, &nDropped, &nSinceWrite);
 
 	// The rate the emulator is *really* running at, against the rate it was
@@ -1119,7 +1122,7 @@ const char *BuildPanel (void)
 			  BareSysInfoBoardName (), Cores,
 			  nArmMHz, nCelsius, pThrottle, pGovernor, Pace,
 			  s_PaceCallMicros,
-			  BareAudioDeviceName (), nFree, nSize, s_PaceDropped, nGapRate, Midi);
+			  BareAudioDeviceName (), nQueuedNow, nSize, s_PaceDropped, nGapRate, Midi);
 	}
 	else
 	{
@@ -1314,39 +1317,50 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		// retro_run(), which is only a pacer while retro_run() returns once per
 		// emulated frame.  Paying it up front makes "one call per frame" true
 		// even when the core presents several frames inside one call.
+		// No wait here any more: the metronome in bare_thread.cpp
+		// (pace_policy.h) holds every emulated frame boundary to its time,
+		// inside the call, trimmed by the sound queue.  Two pacers fought: this
+		// one, at the mode's exact period, would hold back the metronome
+		// whenever the trim asked for a little more speed (an emptying sound
+		// queue), so the trim could only ever work one way.  Its counts - the
+		// frames that never waited, the late ones - now come from the
+		// metronome, after the call.
 		nFrameIndex++;
-		{
-			const u64 nDue = nRefStart + nFrameIndex * nFrameMicros;
-			const u64 nSlotNow = BareMicros ();
-			if (nDue > nSlotNow)
-			{
-				const u64 nWait = nDue - nSlotNow;
-				if (nWait < 1000)
-				{
-					nZeroWaitFrames++;
-				}
-				CTimer::SimpleusDelay (static_cast<unsigned> (nWait));
-				nWaitMicros += nWait;
-			}
-			else
-			{
-				nLateFrames++;
-				nZeroWaitFrames++;
-
-				// Far behind: the frame budget just changed, or the core is
-				// simply not keeping up.  Re-anchor so the lag does not
-				// accumulate for ever.
-				if (nSlotNow - nDue > 200000)
-				{
-					nRefStart = nSlotNow;
-					nFrameIndex = 0;
-				}
-			}
-		}
 
 		const u64 nCallStart = BareMicros ();
 		BareCoreRunFrame ();
 		const u64 nCallMicros = BareMicros () - nCallStart;
+
+		// The metronome (bare_thread.cpp, pace_policy.h) holds every emulated
+		// frame to its time, inside that call.  Its waits are waiting, not
+		// work: they count in the panel's w%, and they come off what the
+		// governor sees - otherwise the time spent holding the machine back
+		// would read as load and raise the clock.  (Judging the work per
+		// emulated frame rather than per call is item 2 of the list, apart.)
+		const u64 nPaceWait = BareThreadTakePaceWaitMicros ();
+		nWaitMicros += nPaceWait;
+		if (nPaceWait < 1000)
+		{
+			nZeroWaitFrames++;		// no time to spare in this call
+			nLateFrames++;
+		}
+		(void) BareThreadTakeCallBoundaries ();	// item 2 (governor per frame), not yet
+		const u64 nWorkMicros = nCallMicros > nPaceWait ? nCallMicros - nPaceWait : 0;
+
+		// The metronome's trim from the sound queue, ten times a second.
+		{
+			static u64 nLastTrimMicros = 0;
+			const u64 nNowTrim = BareMicros ();
+			if (nNowTrim - nLastTrimMicros >= 100000)
+			{
+				nLastTrimMicros = nNowTrim;
+				unsigned nQueued = 0, nSize = 0;
+				if (BareAudioQueueFrames (&nQueued, &nSize))
+				{
+					BareThreadSetPaceTrim (barepace::TrimPpm (nQueued, nSize));
+				}
+			}
+		}
 
 		// A DOS restart (Ctrl+Alt+Del in the emulated BIOS, a program
 		// rebooting the machine, the setup menu): here, between two frames,
@@ -1616,7 +1630,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		// and the governor's temperature veto had no temperature to act on.
 		BareSysInfoRefresh ();
 
-		BareSysInfoGovernorTick (static_cast<unsigned> (nCallMicros),
+		BareSysInfoGovernorTick (static_cast<unsigned> (nWorkMicros),
 					 bRateKnown
 						? static_cast<unsigned> (nFrameMicros)
 						: 0,

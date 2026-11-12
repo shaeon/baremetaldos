@@ -56,11 +56,15 @@ están en local y en el bundle, pendientes de push.
 si hay dudas, pregunta antes."  Orden de trabajo; marcar cada casilla al
 terminarla y anotar debajo lo encontrado:
 
-**Apartado (git stash, sin aprobar):** "WIP encontrado: P1/P2 metronomo de
-ritmo + governor por frame" - intento interrumpido de P1/P2 de la hoja de ruta
-(pace_policy.h, pace_test.cpp, cambios en bare_thread/kernel/bare_audio).  El
-usuario no llegó a aprobar P1.  Preguntarle; si dice que sí: `git stash pop`,
-revisar como código ajeno, `make check-pace`.
+**Punto 1 de la lista (P1) - HECHO, pendiente de probar en placa:** en el
+panel, `bd` debe quedar en ~70 (no 77), `drop` cerca de 0 y `HDMI` hacia la
+mitad de la cola.  (El 2, governor por frame, no aprobado aún.)
+Pasos: [x] stash pop (conflicto del Makefile resuelto: check-keys y check-pace)
+[x] revisar pace_policy.h + prueba (correctos)  [x] revisar bare_thread /
+kernel / bare_audio  [x] quitar lo del punto 2 (división por fotograma)
+[x] arreglo propio: dos marcapasos peleaban (el del bucle frenaba al
+metrónomo cuando el ajuste pedía acelerar); el del bucle ya no espera y sus
+cuentas salen del metrónomo  [x] pruebas PC  [x] compilar  [x] commit + bundle ("pace: one metronome...").
 
 - [x] R1. **Teclado en el menú** - hecho, compilado y en el commit "input: ...":
       - "muchas letras": bare_input.cpp entregaba "pulsada" toda tecla presente

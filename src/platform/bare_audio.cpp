@@ -340,16 +340,16 @@ void BareAudioDrain (void)
 	// keeps playing what it already has while it is being deleted.
 }
 
-unsigned BareAudioQueueFrames (unsigned *pFree, unsigned *pSize)
+unsigned BareAudioQueueFrames (unsigned *pQueued, unsigned *pSize)
 {
 	if (s_pSound == nullptr)
 	{
 		return 0;
 	}
 
-	if (pFree != nullptr)
+	if (pQueued != nullptr)
 	{
-		*pFree = s_pSound->GetQueueFramesAvail ();
+		*pQueued = s_pSound->GetQueueFramesAvail ();	// waiting to be sent
 	}
 
 	if (pSize != nullptr)

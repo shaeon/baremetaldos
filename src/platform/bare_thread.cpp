@@ -85,6 +85,7 @@ struct EmuThreadCanceled
 #endif
 
 #include "bare_env.h"
+#include "pace_policy.h"
 
 #include <circle/sched/scheduler.h>
 #include <circle/timer.h>
@@ -241,6 +242,14 @@ unsigned s_nTrueDrives = 0;
 // is what this port assumed everywhere before it started listening.
 u64 s_nDriveBudgetMicros = 16666;
 
+// The metronome (pace_policy.h), its trim from the sound queue in parts per
+// million (set by kernel.cpp), and the time spent waiting on it - which the
+// frame loop takes off what it gives the governor: waiting is not work.
+barepace::TPacer s_Pacer;
+s64 s_nPaceTrimPpm = 0;
+u64 s_nPaceWaitMicros = 0;
+unsigned s_nCallBoundaries = 0;	// boundaries since the frame loop last asked
+
 // Diagnostic: how many times the frontend came back empty-handed.  The first
 // five are reported on screen and then one in three hundred, so that a repeated
 // failure does not bury the rest of the message.
@@ -349,6 +358,9 @@ void BareThreadResetForRestart (void)
 	// restart itself: 0 means "no hand-back yet", as at power-on.
 	s_nLastHandBackMicros = 0;
 	s_nIdleReports = 0;
+	s_Pacer = barepace::TPacer {};
+	s_nPaceWaitMicros = 0;
+	s_nCallBoundaries = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -505,44 +517,36 @@ auto switchThread (const ThreadSwitchReason reason) -> ThreadSwitchReason
 	//   * this is not a video mode change (that one must reach the frontend at
 	//     once: it is how the frontend hears about a new mode).
 	const boolean bDriven = !s_bHandedOver && reason != ThreadSwitchReason::VideoModeChange;
-	if (bDriven && s_nNextDriveMicros != 0)
+
+	// ---- one metronome for every boundary (pace_policy.h) ------------------
+	// Every frame boundary waits for its time, whether the frontend asked for
+	// it or the emulator reached it on its own.  It used to be only the
+	// latter, against the previous one of its own: with two boundaries per
+	// call of the frame loop, the one the loop asked for was never held, and
+	// a game's 70 Hz mode ran at 77 frames a second (the panel on the board,
+	// 12-nov) - 10 % fast, its surplus sound thrown away at a full queue.  The period is the mode's,
+	// trimmed by the sound queue (BareThreadSetPaceTrim).  A video mode change
+	// is not held: it is how the frontend hears about a new mode.
+	if (reason != ThreadSwitchReason::VideoModeChange)
 	{
-		const u64 nNow = BareMicros ();
-		u64 nWait = s_nNextDriveMicros > nNow ? s_nNextDriveMicros - nNow : 0;
-
-		// Bounded by the budget itself, and that bound is not cosmetic: while
-		// DOS sits at its prompt it emits frame boundaries that draw nothing,
-		// and holding each of them for a whole frame (16 ms) would make the
-		// *frontend* run 30 times a second - the keyboard poll with it.  A
-		// real frame is never due sooner than its budget, so capping the wait
-		// at the budget costs nothing when the emulator is drawing, and keeps
-		// a text screen at the full rate when it is not.
-		if (nWait > s_nDriveBudgetMicros)
-		{
-			nWait = s_nDriveBudgetMicros;
-		}
-
+		const u64 nPeriod = barepace::Trimmed (s_nDriveBudgetMicros, s_nPaceTrimPpm);
+		const u64 nWait = barepace::Wait (s_Pacer, BareMicros (), nPeriod);
 		if (nWait >= 1000)
 		{
 			// Below 1 ms there is nothing worth the call: SimpleusDelay()
 			// polls a register and would spend more time entering than
-			// waiting.
+			// waiting.  (The schedule still advances: the next boundary is
+			// due one period after this one's due time.)
 			CTimer::SimpleusDelay (static_cast<unsigned> (nWait));
+			s_nPaceWaitMicros += nWait;
 		}
-
-		// The next boundary is one budget after this one, measured from
-		// *now* rather than from the deadline: a late frame should not be
-		// paid back by running the next two back to back.
-		s_nNextDriveMicros = BareMicros () + s_nDriveBudgetMicros;
 	}
-	else
-	{
-		s_nNextDriveMicros = BareMicros () + s_nDriveBudgetMicros;
-	}
+	s_nNextDriveMicros = s_Pacer.nNextDue;
 
 	++s_nHandBacks;
 	++s_nHandBacksSinceReport;
 	++s_nBoundaries;
+	++s_nCallBoundaries;
 	s_nLastHandBackMicros = BareMicros ();
 
 	// A drive is an emulator boundary the frontend did not ask for.  The old
@@ -621,6 +625,7 @@ extern "C" void BareThreadSetFrameBudget (unsigned nMicros)
 		// A budget change (a new video mode) invalidates the pending
 		// deadline: the next frame is due one *new* budget from now.
 		s_nNextDriveMicros = 0;
+		s_Pacer = barepace::TPacer {};
 	}
 }
 
@@ -667,4 +672,29 @@ void useSpinlockThreadSync (bool /*use_spinlock*/)
 	// No threads, no locks.  A no-op rather than an assert: the shim calls
 	// this whenever a core option changes, and aborting there would be a worse
 	// outcome than ignoring it.
+}
+
+/// \brief The metronome's trim, in parts per million of the frame period, from
+///\t   the sound queue's fill (barepace::TrimPpm); positive slows the machine.
+extern "C" void BareThreadSetPaceTrim (s64 nPpm)
+{
+	s_nPaceTrimPpm = nPpm;
+}
+
+/// \brief Microseconds the emulator spent waiting on the metronome since the
+///\t   last call.
+extern "C" u64 BareThreadTakePaceWaitMicros (void)
+{
+	const u64 n = s_nPaceWaitMicros;
+	s_nPaceWaitMicros = 0;
+	return n;
+}
+
+/// \brief Frame boundaries since the last call - how many emulated frames the
+///\t   frame loop's last call contained (one, two, sometimes none).
+extern "C" unsigned BareThreadTakeCallBoundaries (void)
+{
+	const unsigned n = s_nCallBoundaries;
+	s_nCallBoundaries = 0;
+	return n;
 }

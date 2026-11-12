@@ -287,12 +287,14 @@ void    BareAudioDrain (void);
 /// \brief Which sound device was started ("none" if audio is muted).
 const char *BareAudioDeviceName (void);
 
-/// \brief Room in the device queue, in the device's own frames.  Returns 0 if
-///\t   there is no device.  This is the one number that answers "is the sound
-///\t   device actually consuming what we give it": free stuck at 0 with drops
-///\t   climbing means it is not, and free oscillating near the queue size
-///\t   means it is.
-unsigned BareAudioQueueFrames (unsigned *pFree, unsigned *pSize);
+/// \brief Frames WAITING in the device queue, and its size, in the device's
+///\t   own frames.  Returns 0 if there is no device.  (This said "room in the
+///\t   queue", and its first value was called "free", but it is Circle's
+///\t   GetQueueFramesAvail: "frames available in the queue waiting to be
+///\t   sent" - the panel's "HDMI 4734/5292" is a queue 89 % FULL.)  Near the
+///\t   size with drops climbing: the machine makes sound faster than it
+///\t   plays; near 0 with gaps: slower.
+unsigned BareAudioQueueFrames (unsigned *pQueued, unsigned *pSize);
 
 /// \brief Audio traffic so far, for the frame loop's watchdog.
 ///\t   pMicrosSinceWrite is 0 if nothing has ever been queued.
@@ -801,6 +803,17 @@ boolean BareDynarecPrepareCodeCache (void *pCache, unsigned nBytes);
 /// \brief How long a frame may take, in microseconds, from the core's rate.
 ///\t   Written by bare_video.cpp when the core announces its rate.
 void BareThreadSetFrameBudget (unsigned nMicros);
+
+/// \brief The metronome's trim from the sound queue, in parts per million of
+///\t   the frame period (pace_policy.h TrimPpm); positive slows the machine.
+void BareThreadSetPaceTrim (s64 nPpm);
+
+/// \brief Microseconds spent waiting on the metronome since the last call; the
+///\t   frame loop takes them off the time it gives the governor.
+u64 BareThreadTakePaceWaitMicros (void);
+
+/// \brief Emulated frame boundaries since the last call.
+unsigned BareThreadTakeCallBoundaries (void);
 
 /// \brief Frame boundaries the emulated machine reached since the last call.
 ///
