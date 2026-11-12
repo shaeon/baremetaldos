@@ -46,6 +46,7 @@ están en local y en el bundle, pendientes de push.
 | (el de "web: password from the page, rename, move, free space") | Servidor web al estilo ZXMetalCircle: contraseña desde la web, renombrar, mover, espacio libre |
 | (el de "fix: the boot stopped after the \"fb:\" lines") | Cuelgue al arrancar (foto del usuario): segunda llamada a CGlueStdioInit (assert) del commit 6ca96f0; quitada.  PROGRESO.md pasa a la raíz |
 | (el de "dos: Ctrl+Alt+Del as on a PC - the BIOS asks...") | Ctrl+Alt+Supr como en un PC: la BIOS emulada pide el reinicio (parche), reinicio de DOS sin reiniciar la placa, CPU y caché del dynarec limpias, MIDI aparcado; R del menú = reiniciar DOS.  **Probar en placa:** 10-20 reinicios seguidos (memoria libre estable), sonido/ratón/CD después, reiniciar tras DOOM (modo protegido), Windows 3.x se queda la combinación. |
+| (el de "fix: clock and temperature read only with the panel on") | Temperatura y reloj a 0: BareSysInfoRefresh solo corría con el panel PetSis visible; ahora siempre (y en el menú).  El veto por temperatura del governor no actuaba con el panel oculto.  Corrige la explicación anterior (no era la carrera del búfer del firmware) |
 
 ## En curso
 

@@ -2543,6 +2543,7 @@ void BareMenuTick (void)
 		s_bRepeatKey = false;
 		BareCoreReleaseAllKeys ();
 		BareVideoSaveScreen ();
+		BareSysInfoRefresh ();
 		SetupTexts ();
 		DefineSettings ();
 		LoadSettings ();
@@ -2632,10 +2633,12 @@ void BareMenuTick (void)
 		return;
 	}
 
-	// Live values once a second.
+	// Live values once a second.  The frame loop does not run while the menu
+	// is open, so the clock and the temperature are refreshed from here.
 	if (nNow - s_nLastRefresh >= 1000000)
 	{
 		s_nLastRefresh = nNow;
+		BareSysInfoRefresh ();
 		BuildPages ();		// the cursor stays where it was (CMenu::Refresh)
 		s_bDirty = true;
 	}

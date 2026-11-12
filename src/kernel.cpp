@@ -1608,6 +1608,14 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		const boolean bFrameChanged = nChangedNow != nLastChangedForGovernor;
 		nLastChangedForGovernor = nChangedNow;
 
+		// The clock, the temperature and the firmware's throttling flags,
+		// every loop: BareSysInfoRefresh limits itself to one reading every
+		// 2 s (with core 2 presenting it only copies what core 2 read).  It
+		// used to run only while the PetSis panel was visible, so with the
+		// panel hidden - the default - the setup menu showed 0 MHz and 0 °C
+		// and the governor's temperature veto had no temperature to act on.
+		BareSysInfoRefresh ();
+
 		BareSysInfoGovernorTick (static_cast<unsigned> (nCallMicros),
 					 bRateKnown
 						? static_cast<unsigned> (nFrameMicros)
