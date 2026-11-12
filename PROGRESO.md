@@ -268,7 +268,16 @@ también es un core libretro.  DOSBox Pure lo es (Voodoo, Windows 9x, ZIP);
 DOSBox Staging, DOSBox-X y 86Box son aplicaciones SDL/Qt: port nuevo.  86Box
 además es emulación de bajo nivel: pide BIOS, DOS instalado en imagen de disco
 y mucha más CPU (su FAQ: ~700 puntos mono-hilo para un 486DX2/66).
-Recomendación dada: seguir con dosbox-core.  Dato útil: el código de Voodoo
+Recomendación dada: seguir con dosbox-core.
+
+IDEA PARA EL FUTURO (usuario, 12-nov): un proyecto aparte, el mismo frontend
+(Circle + libretro) con DOSBox Pure como núcleo, para probar cómo va.  Si se
+empezara de cero, sería la elección: un core libretro que lo trae casi todo
+dentro (sin el SDL falso, SDL_net, FluidSynth ni Munt externos), con Voodoo por
+software, juegos desde ZIP, lanzador y apoyo para Windows 9x, y la misma
+velocidad que DOSBox.  Sin probar en bare-metal: lo incierto es su dynarec
+ARM64 y sus hilos en Circle (lo que más costó con dosbox-core), y su menú
+propio, que habría que apagar o rodear.  ESTE proyecto sigue con dosbox-core.  Dato útil: el código de Voodoo
 YA está en third_party/dosbox-core/src/hardware/voodoo*.cpp, excluido en el
 Makefile (WITH_VOODOO=0, "OpenGL"): mirar si su ruta por software compila
 (punto 23).
