@@ -103,8 +103,9 @@ revisar como código ajeno, `make check-pace`.
 ## Hoja de ruta de rendimiento (12-nov, pendiente de que el usuario elija)
 
 A. Governor: A1 ver qué hace (datos en Rendimiento), A2 subir antes (huecos de
-   audio como señal, calentamiento al arrancar un programa), A3 nivel de
-   overclock opcional (Pi 4 a 1800/2000), A4 margen de temperatura.
+   audio como señal, calentamiento al arrancar un programa), A4 margen de
+   temperatura.  (A3 overclock: DESCARTADO por ahora, decisión del usuario
+   12-nov: "nada de overclocking de momento".)
 B. Perfilador por partes del frame en el núcleo 0.
 C. Compilación: -O3 y LTO en DOSBox-core (medir).
 D. Ajustes de DOSBox en el menú: oplemu, frecuencia del mezclador, ciclos
