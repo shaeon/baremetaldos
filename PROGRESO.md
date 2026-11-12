@@ -50,7 +50,26 @@ están en local y en el bundle, pendientes de push.
 
 ## En curso
 
-- Nada.
+### Revisión completa del proyecto (pedida por el usuario, 12-nov)
+
+"Ahora que funciona y estamos afinando: revísalo y ve arreglando lo que veas;
+si hay dudas, pregunta antes."  Orden de trabajo; marcar cada casilla al
+terminarla y anotar debajo lo encontrado:
+
+- [ ] R1. **Teclado en el menú (fallos vistos por el usuario):** al escribir la
+      contraseña salen muchas letras, el Mayús izquierdo no funciona, y sospecha
+      que lo que se ve no es lo que se guarda.  Mirar: bare_input.cpp (cómo
+      llegan pulsaciones y modificadores), BareMenuKey / BareMenuTick
+      (bare_menu.cpp), menu_keymap.h (posiciones ISO: ç, º, <), escritura de
+      wpa_supplicant.conf y boot.conf.
+- [ ] R2. Menú: guardar/descartar/por defecto de cada pestaña contra los
+      ficheros reales (boot.conf, dosbox.conf, cmdline.txt).
+- [ ] R3. Arranque: orden, esperas, logo, SUPR, reinicio de DOS.
+- [ ] R4. Audio y MIDI: colas, descartes (drop), volumen, pruebas de sonido.
+- [ ] R5. Vídeo: presentador, menú encima, restaurar pantalla.
+- [ ] R6. Red: WiFi, NTP, servidor web, módem/IPX.
+- [ ] R7. Governor y ritmo (P1/P2 de la hoja de ruta).
+- [ ] R8. CI, make-sd, parches, README.
 
 ## Pendiente
 
@@ -60,6 +79,30 @@ están en local y en el bundle, pendientes de push.
 - Probar en placa todo lo del menú y la red (el usuario aún no lo ha probado),
   y el reinicio de DOS (ver la fila de Ctrl+Alt+Supr).
 - Llevar el trabajo a Miguel Ángel (mmoroca) como PR.
+
+## Hoja de ruta de rendimiento (12-nov, pendiente de que el usuario elija)
+
+A. Governor: A1 ver qué hace (datos en Rendimiento), A2 subir antes (huecos de
+   audio como señal, calentamiento al arrancar un programa), A3 nivel de
+   overclock opcional (Pi 4 a 1800/2000), A4 margen de temperatura.
+B. Perfilador por partes del frame en el núcleo 0.
+C. Compilación: -O3 y LTO en DOSBox-core (medir).
+D. Ajustes de DOSBox en el menú: oplemu, frecuencia del mezclador, ciclos
+   automáticos.
+E. No copiar el frame (si el core lo admite).
+F. OPL en el núcleo 3 (solo si B lo justifica).
+
+Lectura del panel del usuario (12-nov, escena de créditos, Pi 4):
+`v2 39/s ov0 12.6ms vs | 1500 MHz 43C | L1/2 max over3215 | pace 38/70 w0% bd77
+dup 0 + | fr 25673us | HDMI 4734/5292 | drop 9512 gap 0`.  Núcleo 2 bien; la
+temperatura ya se lee.  bd77 > 70: la máquina avanza ~10 % más rápido que el
+tiempo real sin que el bucle la frene (w0%, "+"), el audio llega de más y se
+tira (drop 9512 muestras/s = ~11 % de 88200): posible origen de chasquidos.
+El governor recibe el tiempo de toda la llamada (fr 25.7 ms, con ~2 fronteras
+dentro) contra el presupuesto de UN frame (14.3 ms) -> ve sobrecarga
+(over3215) que no es real y se queda en el máximo.  Propuesta: P1 frenar a la
+máquina cuando va por delante (prioritario), P2 governor midiendo por
+frontera (A1/A2).
 
 ## Notas técnicas
 
