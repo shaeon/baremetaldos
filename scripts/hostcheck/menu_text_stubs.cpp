@@ -70,3 +70,15 @@ CScheduler *CScheduler::Get (void) { return &s_Sched; }
 void CScheduler::Yield (void) {}
 void CTimer::SimpleMsDelay (unsigned) {}
 const TFont Font8x16 = { 8, 16, 0, 0x21, 0xFF, nullptr };
+
+// The profiler: the longest plausible channel list.
+void BareProfileGet (TBareProfile *p)
+{
+	*p = TBareProfile {};
+	p->bValid = TRUE;
+	p->nCpu = 1000; p->nSound = 1000; p->nVideo = 1000; p->nAudio = 1000;
+	p->nInput = 1000; p->nWait = 1000; p->nOther = 1000;
+	static const char *const Names[] = { "FM", "SB", "GUS", "SPKR", "TANDY", "DISNEY", "CMS", "PS1DAC" };
+	p->nChannels = 8;
+	for (unsigned i = 0; i < 8; i++) { p->pChannelName[i] = Names[i]; p->nChannel[i] = 1000; }
+}

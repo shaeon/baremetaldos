@@ -959,6 +959,14 @@ boolean MirrorStore (const u32 *pPixels, unsigned nWidth, unsigned nHeight,
 void BareVideoPresent (const u32 *pPixels, unsigned nWidth, unsigned nHeight,
 		       unsigned nPitchBytes)
 {
+	// The profiler's "Vídeo": this function's time on core 0, whichever
+	// return it leaves by.
+	struct TProfileScope
+	{
+		const u64 nStart = BareProfileClock ();
+		~TProfileScope () { BareProfileAdd (BareProfileVideo, BareProfileClock () - nStart); }
+	} ProfileScope;
+
 	// First real frame from the emulator: the screen is DOS's from now on.
 	// Stop writing status lines - but do NOT wipe the screen here.
 	//

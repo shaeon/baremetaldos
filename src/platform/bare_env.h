@@ -419,6 +419,37 @@ char    BareDosFileOpen (const char *pCardPath);
 ///\t   program starts or ends (bare_dosfiles.cpp).
 unsigned BareDosCurrentPsp (void);
 
+// ---------------------------------------------------------------------------
+// Profiler - bare_profile.cpp (item 5): where core 0's time goes
+// ---------------------------------------------------------------------------
+
+/// Parts (profile_core.h TPart): 0 the emulator call, 1 the metronome's
+/// waits, 2 presenting video, 3 the audio queue with the MIDI mix, 4 USB input.
+enum { BareProfileCall, BareProfileWait, BareProfileVideo, BareProfileAudio, BareProfileInput };
+
+u64     BareProfileClock (void);
+void    BareProfileAdd (unsigned nPart, u64 nTicks);
+void    BareProfileAddMicros (unsigned nPart, u64 nMicros);
+void    BareProfileTick (void);
+void    BareProfileRestart (void);	///< a pause: drop the window in progress
+
+/// The last complete one-second window, in tenths of a percent of core 0.
+struct TBareProfile
+{
+	boolean bValid;
+	unsigned nCpu;			///< the emulated x86 CPU (and the rest of DOSBox)
+	unsigned nSound;		///< all of DOSBox's sound channels
+	unsigned nVideo;
+	unsigned nAudio;		///< the port's audio queue, MIDI mix included
+	unsigned nInput;
+	unsigned nWait;			///< the metronome holding the machine back
+	unsigned nOther;		///< the frame loop's own work, the menu, the network
+	unsigned nChannels;
+	const char *pChannelName[8];	///< DOSBox's names: "FM", "SB", "GUS"...
+	unsigned nChannel[8];
+};
+void    BareProfileGet (TBareProfile *pOut);
+
 /// \brief Take presentation back to core 0 (before anything else draws on
 ///\t   the screen, e.g. at shutdown).  Waits for core 2 to stop; leaves the
 ///\t   last picture on page 0.

@@ -1975,6 +1975,46 @@ void BuildPages (void)
 
 		// The time spent at each clock, one line each (three levels did not
 		// fit on one line).
+		// Where core 0's time went in the last second before the menu was
+		// opened (item 5: is the sound worth moving to a free core?).
+		{
+			TBareProfile Prof;
+			BareProfileGet (&Prof);
+			auto Pct = [] (unsigned nPermille)
+				{ return Format ("%u,%u %%", nPermille / 10, nPermille % 10); };
+			P.Items.push_back (Section ("Dónde se va el tiempo (núcleo 0)"));
+			if (!Prof.bValid)
+			{
+				P.Items.push_back (Info ("  (aún sin medir)", "",
+					"Hace falta un segundo entero con DOS en marcha. Vuelve a abrir el "
+					"menú desde un juego."));
+			}
+			else
+			{
+				const char *pWhen = "El último segundo antes de abrir el menú, con DOS en marcha.";
+				P.Items.push_back (Info ("  CPU x86", Pct (Prof.nCpu),
+					std::string ("El procesador emulado y el resto de DOSBox. ") + pWhen));
+				P.Items.push_back (Info ("  Sonido de DOSBox", Pct (Prof.nSound),
+					std::string ("Lo que cuestan las tarjetas de sonido emuladas, sumadas: es lo "
+						     "que se ganaría moviéndolas a un núcleo libre. ") + pWhen));
+				for (unsigned i = 0; i < Prof.nChannels; i++)
+				{
+					P.Items.push_back (Info (Format ("    %s", Prof.pChannelName[i]), Pct (Prof.nChannel[i]),
+						"Un canal del mezclador de DOSBox: FM es la música AdLib (OPL), SB "
+						"los efectos digitales, GUS la Gravis, SPKR el altavoz."));
+				}
+				P.Items.push_back (Info ("  Vídeo", Pct (Prof.nVideo),
+					"Entregar cada imagen (con el vídeo en el núcleo 2, solo copiarla)."));
+				P.Items.push_back (Info ("  Audio y MIDI", Pct (Prof.nAudio),
+					"La cola de salida del port, con la mezcla del MIDI del núcleo 1."));
+				P.Items.push_back (Info ("  Teclado y ratón", Pct (Prof.nInput)));
+				P.Items.push_back (Info ("  Esperando", Pct (Prof.nWait),
+					"El metrónomo frenando la máquina para ir a tiempo real: tiempo libre."));
+				P.Items.push_back (Info ("  Otros", Pct (Prof.nOther),
+					"El bucle del port, el panel, la red y el servidor web."));
+			}
+		}
+
 		P.Items.push_back (Section ("Tiempo en cada reloj"));
 		for (unsigned i = 0; i < Gov.nLevels && i < 8; i++)
 		{

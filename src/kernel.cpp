@@ -1304,6 +1304,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 
 			nRefStart = BareMicros ();
 			BareSysInfoGovernorResumed ();	// audio gaps right after this are not load
+			BareProfileRestart ();			// nor is this window's timing
 			nFrameIndex = 0;
 
 			continue;
@@ -1318,6 +1319,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 			// the wall-clock time that passed.
 			nRefStart = BareMicros ();
 			BareSysInfoGovernorResumed ();	// audio gaps right after this are not load
+			BareProfileRestart ();			// nor is this window's timing
 			nFrameIndex = 0;
 
 			continue;
@@ -1339,8 +1341,10 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		nFrameIndex++;
 
 		const u64 nCallStart = BareMicros ();
+		const u64 nCallTicks = BareProfileClock ();
 		BareCoreRunFrame ();
 		const u64 nCallMicros = BareMicros () - nCallStart;
+		BareProfileAdd (BareProfileCall, BareProfileClock () - nCallTicks);
 
 		// The metronome (bare_thread.cpp, pace_policy.h) holds every emulated
 		// frame to its time, inside that call.  Its waits are waiting, not
@@ -1349,6 +1353,8 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		// would read as load and raise the clock.
 		const u64 nPaceWait = BareThreadTakePaceWaitMicros ();
 		nWaitMicros += nPaceWait;
+		BareProfileAddMicros (BareProfileWait, nPaceWait);
+		BareProfileTick ();
 		if (nPaceWait < 1000)
 		{
 			nZeroWaitFrames++;		// no time to spare in this call
@@ -1393,6 +1399,7 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 			}
 			nRefStart = BareMicros ();
 			BareSysInfoGovernorResumed ();	// audio gaps right after this are not load
+			BareProfileRestart ();			// nor is this window's timing
 			s_nHomePsp = s_nLastPsp = 0;		// a new shell, a new PSP
 			nFrameIndex = 0;
 			continue;

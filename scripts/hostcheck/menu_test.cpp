@@ -182,6 +182,25 @@ int main (void)
 		Check (Ev.Kind == TEventKind::Input && Ev.bCancelled, "Esc cancels the input");
 	}
 
+	std::printf ("long pages\n");
+	{
+		CMenu L;
+		TPage P; P.Title = "Larga";
+		P.Items.push_back (Choice ("Modo", 1, {"a", "b"}));
+		for (int i = 0; i < 40; i++) P.Items.push_back (Info (("Dato " + std::to_string (i)).c_str (), "x"));
+		L.Pages = { P }; L.Refresh ();
+		for (int i = 0; i < 39; i++) L.Key (TKey::Down);
+		CScreen T; L.Render (T);
+		bool bLast = false;
+		for (unsigned y = CMenu::BodyTop; y < CMenu::BodyTop + CMenu::BodyRows; y++)
+			bLast = bLast || Contains (T.RowText (y), "Dato 38 ");
+		Check (L.Selected () == 39 && bLast,
+		       "on a page longer than the screen the cursor walks the information lines, so they scroll into view");
+		TPage Short; Short.Title = "Corta"; Short.Items = { Choice ("Modo", 1, {"a"}), Info ("Dato", "x") };
+		CMenu S2; S2.Pages = { Short }; S2.Refresh (); S2.Key (TKey::Down);
+		Check (S2.Selected () == 0, "on a page that fits, information lines are still skipped");
+	}
+
 	std::printf ("scrolling and wrapping\n");
 	{
 		CMenu L;

@@ -201,6 +201,14 @@ void BareAudioDeinit (void)
 
 void BareAudioQueue (const s16 *pFrames, unsigned nFrames)
 {
+	// The profiler's "Audio y MIDI": this function's time on core 0, the MIDI
+	// mix included.
+	struct TProfileScope
+	{
+		const u64 nStart = BareProfileClock ();
+		~TProfileScope () { BareProfileAdd (BareProfileAudio, BareProfileClock () - nStart); }
+	} ProfileScope;
+
 	if (s_pSound == nullptr || nFrames == 0)
 	{
 		// Muted build.  Nothing to wait for and nothing to pace: the frame

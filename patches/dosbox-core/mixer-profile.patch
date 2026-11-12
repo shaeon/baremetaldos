@@ -1,0 +1,29 @@
+diff --git a/src/hardware/mixer.cpp b/src/hardware/mixer.cpp
+index f40c0843..0621d590 100644
+--- a/src/hardware/mixer.cpp
++++ b/src/hardware/mixer.cpp
+@@ -184,14 +184,24 @@ void MixerChannel::SetFreq(Bitu freq) {
+ 	}
+ }
+ 
++// BM-DOS: the time each channel's handler takes (the OPL's synthesis for
++// "FM", the Gravis's for "GUS"...), for the frontend's profiler - to decide
++// whether the sound should move to another core.  Weak: without the frontend
++// both pointers are null and nothing is timed.
++extern unsigned long long BARE_ProfileClock(void) __attribute__((weak));
++extern void BARE_ProfileChannel(const char * name, unsigned long long ticks) __attribute__((weak));
++
+ void MixerChannel::Mix(Bitu _needed) {
+ 	needed=_needed;
++	const bool profile = BARE_ProfileChannel != nullptr && BARE_ProfileClock != nullptr;
++	const unsigned long long start = profile ? BARE_ProfileClock() : 0;
+ 	while (enabled && needed>done) {
+ 		Bitu left = (needed - done);
+ 		left *= freq_add;
+ 		left  = (left >> FREQ_SHIFT) + ((left & FREQ_MASK)!=0);
+ 		handler(left);
+ 	}
++	if (profile) BARE_ProfileChannel(name, BARE_ProfileClock() - start);
+ }
+ 
+ void MixerChannel::AddSilence(void) {

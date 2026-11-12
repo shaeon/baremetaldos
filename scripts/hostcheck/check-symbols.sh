@@ -94,6 +94,13 @@ BareDiskAvailable
 BareDiskInUse
 BareDosFileOpen
 BareDosCurrentPsp
+# The profiler reads the ARM timer with inline asm: board only.
+BareProfileClock
+BareProfileAdd
+BareProfileAddMicros
+BareProfileTick
+BareProfileRestart
+BareProfileGet
 # The board's network (bare_net.cpp): built for the board only, against
 # Circle's net and WLAN headers, which the host stand-ins do not carry.
 BareNetInit

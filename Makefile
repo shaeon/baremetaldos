@@ -603,6 +603,7 @@ APP_SRCS := \
 	src/platform/bare_net.cpp \
 	src/platform/bare_web.cpp \
 	src/platform/bare_cardfree.cpp \
+	src/platform/bare_profile.cpp \
 	src/platform/bare_sdlnet.cpp \
 	src/platform/bare_midi.cpp \
 	src/dosbox-stub/midi_stub.cpp \
@@ -1363,6 +1364,14 @@ check-keys:
 		-o build/key_report_test scripts/hostcheck/key_report_test.cpp
 	@build/key_report_test
 
+# Where core 0's time goes, in one-second windows (profile_core.h).
+.PHONY: check-profile
+check-profile:
+	@mkdir -p build
+	@$(HOST_CXX) -std=gnu++23 -O1 -Wall -Wextra -Wpedantic -Wshadow \
+		-o build/profile_test scripts/hostcheck/profile_test.cpp
+	@build/profile_test
+
 # The frame metronome and its trim from the sound queue (pace_policy.h).
 .PHONY: check-pace
 check-pace:
@@ -1477,7 +1486,7 @@ check-dynarec-hook:
 # config parser.  This is the target to run before a cross build.
 check-host: check-platform check-kernel check-bootconf check-scaling check-dynarec \
             check-coreopts check-resample check-storage check-governor check-portorder \
-            check-dynarec-hook check-midi check-frames check-audio check-scale check-menu check-menu-text check-conf check-web check-keys check-pace
+            check-dynarec-hook check-midi check-frames check-audio check-scale check-menu check-menu-text check-conf check-web check-keys check-pace check-profile
 print-srcs:
 	@echo $(ALL_SRCS)
 

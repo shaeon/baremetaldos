@@ -619,10 +619,14 @@ private:
 		}
 	}
 
-	static bool Selectable (const TItem &Item)
+	// On a page longer than the screen the cursor also stops on information
+	// lines: the list only scrolls with the cursor, and lines below the last
+	// option would otherwise never be seen (Rendimiento, with the profiler).
+	bool Selectable (const TItem &Item) const
 	{
 		return Item.Kind == TKind::Action || Item.Kind == TKind::Choice
-		       || Item.Kind == TKind::Planned;
+		       || Item.Kind == TKind::Planned
+		       || (Item.Kind == TKind::Info && Count () > BodyRows);
 	}
 
 	unsigned Count (void) const
@@ -684,9 +688,13 @@ private:
 			return;
 
 		case TKind::Info:
-			S.Put (LabelCol, y, Item.Label, Black, LightGrey, nLabelW);
-			S.Put (ValueCol, y, Item.Value, Blue, LightGrey, ApplyCol - ValueCol - 1);
+		{
+			const std::uint8_t nBg = bSelected ? Blue : LightGrey;
+			if (bSelected) S.Fill (LabelCol - 1, y, ApplyCol - LabelCol + 2, 1, White, nBg);
+			S.Put (LabelCol, y, Item.Label, bSelected ? White : Black, nBg, nLabelW);
+			S.Put (ValueCol, y, Item.Value, bSelected ? Yellow : Blue, nBg, ApplyCol - ValueCol - 1);
 			return;
+		}
 
 		case TKind::Planned:
 		{

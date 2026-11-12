@@ -196,7 +196,9 @@ static void BareInputPollCallback (void)
 	// USB stack and cooperative scheduler need to be serviced from TASK_LEVEL;
 	// doing it here means it happens exactly once per frame, from the frame
 	// thread, which is where we want it.
+	const u64 nProfileStart = BareProfileClock ();
 	BareInputPoll ();
+	BareProfileAdd (BareProfileInput, BareProfileClock () - nProfileStart);
 }
 
 static int16_t BareInputState (unsigned port, unsigned device, unsigned index,

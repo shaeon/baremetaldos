@@ -68,6 +68,17 @@ pausa / reinicio; temperatura manda  [x] política + 11 pruebas (check-governor)
 Limitación conocida: si el autoexec lanza un juego al arrancar, el primer PSP
 visto puede ser el del juego (no hay calentamiento ese primer arranque).
 
+**Punto 5 (perfilador) - HECHO, pendiente de leerlo en placa.**  (Encontrado a medias de
+una sesión cortada; su aprobación no está en la conversación visible, pero el
+usuario pidió "sigue por donde te has quedado".)  Objetivo del usuario:
+decidir si se mueve el sonido al núcleo libre (3).  Pasos: [x] dónde mezcla
+DOSBox (MixerChannel::Mix)  [x] diseño (ventanas de 1 s, CNTPCT_EL0)
+[x] patches/dosbox-core/mixer-profile.patch  [x] port: bare_profile.cpp +
+profile_core.h (check-profile); vídeo, audio, entrada (dentro de la llamada),
+llamada y espera  [x] Rendimiento: "Dónde se va el tiempo"; páginas largas:
+el cursor recorre las líneas informativas (menu_model.h, prueba nueva)
+[x] pruebas PC  [x] compilar  [x] commit + bundle ("profile: where core 0's time goes...").
+
 ### Revisión completa del proyecto (pedida por el usuario, 12-nov)
 
 "Ahora que funciona y estamos afinando: revísalo y ve arreglando lo que veas;
