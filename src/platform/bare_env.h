@@ -436,6 +436,36 @@ unsigned BareDosCurrentPsp (void);
 void    BareDosForgetDevices (void);
 
 // ---------------------------------------------------------------------------
+// The updater (bare_update.cpp; the pieces in src/update/, from ZXMetalCircle)
+// ---------------------------------------------------------------------------
+
+struct TBareUpdateInfo
+{
+	const char *pRepo;		///< owner/name on GitHub
+	boolean bChecking;		///< the boot check is still asking
+	boolean bChecked;		///< GitHub has been asked (or tried)
+	const char *pLatest;		///< its latest release ("" if none known)
+	boolean bNewer;			///< ...newer than this kernel
+	const char *pError;		///< why the last query found nothing ("" if none)
+	const char *pInterrupted;	///< update/EN_CURSO: a version whose install did not finish
+};
+
+/// \brief At boot: the repository, update/EN_CURSO, and the boot check (a task
+///\t   of its own) when boot.conf asks for it.
+void    BareUpdateInit (const char *pRepo, boolean bBootCheck);
+void    BareUpdateGetInfo (TBareUpdateInfo *pInfo);
+/// \brief Ask GitHub now (from the menu; it shows what it is doing).
+boolean BareUpdateCheck (void);
+/// \brief The packages kept in update/, newest first.
+unsigned BareUpdatePackages (char (*pVersions)[16], unsigned nMax);
+/// \brief Install a version: from its package in update/, or downloaded (the
+///\t   latest release).  pSummary says what happened, either way.
+boolean BareUpdateInstall (const char *pVersion, boolean bReplaceConfig, boolean bKeepAll,
+			   char *pSummary, unsigned nSummarySize);
+/// \brief This kernel's version (BMDOS_VERSION).
+const char *BareUpdateInstalledVersion (void);
+
+// ---------------------------------------------------------------------------
 // Profiler - bare_profile.cpp (item 5): where core 0's time goes
 // ---------------------------------------------------------------------------
 

@@ -177,6 +177,10 @@ static const TAudioCase AudioCases[] =
 	{ "raton: velocidad fuera de rango", "mouse_speed = 1000\n", false, 100, 100, "mouse_speed" },
 	{ "setup: sin espera", "setup_wait = 0\n", false, 100, 100, nullptr },
 	{ "panel: visible", "panel = on\n", false, 100, 100, nullptr },
+	{ "update: repo, al arrancar, todos", "update_repo = mmoroca/baremetaldos\nupdate_check = on\nupdate_keep = all\n", false, 100, 100, nullptr },
+	{ "update: repo sin barra", "update_repo = shaeon\n", false, 100, 100, "update_repo" },
+	{ "update: repo con espacio raro", "update_repo = a/b;rm\n", false, 100, 100, "update_repo" },
+	{ "update: keep raro", "update_keep = tres\n", false, 100, 100, "update_keep" },
 	{ "panel: valor raro", "panel = si\n", false, 100, 100, "panel" },
 	{ "setup: espera fuera de rango", "setup_wait = 9\n", false, 100, 100, "setup_wait" },
 	{ "hora: zona de Espana", "timezone = CET-1CEST,M3.5.0,M10.5.0/3\n", false, 100, 100, nullptr },
@@ -322,6 +326,10 @@ int main (void)
 		Check (Config.nMouseSpeed == (strstr (Case.pContents, "mouse_speed = 200") ? 200u : 100u), Case.pName, "mouse_speed");
 		Check (Config.nSetupWait == (strstr (Case.pContents, "setup_wait = 0") ? 0u : 2u), Case.pName, "setup_wait");
 		Check (Config.bPanel == (strstr (Case.pContents, "panel = on") != nullptr), Case.pName, "panel");
+		Check (strcmp (Config.UpdateRepo, strstr (Case.pContents, "mmoroca/") ? "mmoroca/baremetaldos" : "shaeon/baremetaldos") == 0,
+		       Case.pName, "update_repo");
+		Check (Config.bUpdateCheck == (strstr (Case.pContents, "update_check = on") != nullptr), Case.pName, "update_check");
+		Check (Config.bUpdateKeepAll == (strstr (Case.pContents, "update_keep = all") != nullptr), Case.pName, "update_keep");
 		Check (Config.bWebServer == (strstr (Case.pContents, "web_server = on") != nullptr), Case.pName, "web_server");
 		Check (strcmp (Config.WebPassword, strstr (Case.pContents, "web_password = s3cr3t!") ? "s3cr3t!" : "") == 0,
 		       Case.pName, "web_password");

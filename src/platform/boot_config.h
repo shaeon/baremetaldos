@@ -200,6 +200,14 @@ struct TBootConfig
 	// default); PetSis still toggles it for the session.
 	bool bPanel;
 
+	// The updater (src/update/, bare_update.cpp): the GitHub repository its
+	// releases come from ("owner/name"), whether to look for a new one at
+	// boot (off by default), and which downloaded packages to keep in
+	// update/: the installed and the previous one, or all.
+	char UpdateRepo[64];
+	bool bUpdateCheck;
+	bool bUpdateKeepAll;
+
 	// DOS's time zone, as a POSIX TZ rule (newlib's TZ): "UTC0", or with
 	// daylight saving, "CET-1CEST,M3.5.0,M10.5.0/3" for peninsular Spain.
 	char TimeZone[64];
@@ -285,6 +293,9 @@ void ReadBootConfig (TBootConfig *pConfig)
 	pConfig->nMouseSpeed = 100;
 	pConfig->nSetupWait = 2;
 	pConfig->bPanel = false;
+	strcpy (pConfig->UpdateRepo, "shaeon/baremetaldos");
+	pConfig->bUpdateCheck = false;
+	pConfig->bUpdateKeepAll = false;
 	strcpy (pConfig->TimeZone, "UTC0");
 	pConfig->bWebServer = false;
 	pConfig->WebPassword[0] = '\0';
@@ -509,6 +520,36 @@ void ReadBootConfig (TBootConfig *pConfig)
 			}
 			if (bOk) strcpy (pConfig->TimeZone, pValue);
 			else BootConfigWarn (pConfig, "boot.conf: timezone \"%s\" is not a POSIX TZ rule", pValue);
+		}
+		else if (strcmp (pKey, "update_repo") == 0)
+		{
+			// owner/name: GitHub's letters, digits, '-', '_', '.', one '/'
+			bool bOk = strlen (pValue) < sizeof pConfig->UpdateRepo;
+			unsigned nSlashes = 0;
+			for (const char *p = pValue; *p != '\0' && bOk; p++)
+			{
+				const char c = *p;
+				if (c == '/') nSlashes++;
+				else bOk = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+					   || c == '-' || c == '_' || c == '.';
+			}
+			bOk = bOk && nSlashes == 1 && pValue[0] != '/' && pValue[strlen (pValue) - 1] != '/';
+			if (bOk) strcpy (pConfig->UpdateRepo, pValue);
+			else BootConfigWarn (pConfig, "boot.conf: update_repo \"%s\" (owner/name, as on GitHub)", pValue);
+		}
+		else if (strcmp (pKey, "update_check") == 0 || strcmp (pKey, "update_keep") == 0)
+		{
+			const bool bCheck = strcmp (pKey, "update_check") == 0;
+			const char *pOn = bCheck ? "on" : "all";
+			const char *pOff = bCheck ? "off" : "two";
+			if (strcmp (pValue, pOn) == 0 || strcmp (pValue, pOff) == 0)
+			{
+				(bCheck ? pConfig->bUpdateCheck : pConfig->bUpdateKeepAll) = strcmp (pValue, pOn) == 0;
+			}
+			else
+			{
+				BootConfigWarn (pConfig, "boot.conf: unknown %s \"%s\" (%s|%s)", pKey, pValue, pOff, pOn);
+			}
 		}
 		else if (strcmp (pKey, "panel") == 0)
 		{

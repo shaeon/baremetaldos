@@ -659,6 +659,7 @@ APP_SRCS := \
 	src/update/inflate.cpp \
 	src/update/httpsclient.cpp \
 	src/update/circleglue.cpp \
+	src/platform/bare_update.cpp \
 	src/dosbox-stub/midi_stub.cpp \
 	src/dosbox-stub/posix_stubs.cpp
 

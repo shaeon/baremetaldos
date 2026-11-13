@@ -104,6 +104,9 @@ enum TActionId
 	ActSaveRestart,			// "Guardar y reiniciar la placa"
 	ActSaveStay,			// "Guardar": and stay in the menu
 	ActDiscardStay,			// "Deshacer los cambios": and stay
+	ActUpdCheck,			// Sistema, Actualización: ask GitHub
+	ActUpdInstall,			// install the newer release found
+	ActUpdSaved,			// install a package kept in update/
 	ActRestartDos,
 	ActDiscard,
 	ActDefaults,
@@ -162,6 +165,11 @@ bool s_bOpenedAtBoot = false;
 // restart ran right after the boot: a second DOSBox start for nothing.
 bool s_bBeforeDos = false;
 
+// The updater: the version a dialog is about, and the kept packages offered.
+std::string s_UpdVersion;
+char s_UpdSaved[4][16];
+unsigned s_nUpdSaved = 0;
+
 // Saved but not applied yet: what "Guardar" (staying in the menu) left to do.
 // The title says so until it is done: 1 = restart DOS, 2 = restart the board
 // (which applies the R settings too).  A board restart clears it by itself; a
@@ -206,6 +214,10 @@ enum TDialogId
 	DlgInfo,		// Aceptar, nothing to do after it
 	DlgUnsavedThen,		// changes, before restarting / shutting down:
 				// Guardar y seguir / Sin guardar / Cancelar
+	DlgUpdHow,		// how to install s_UpdVersion: keep my settings /
+				// take the new ones / Cancelar
+	DlgUpdSaved,		// which kept package: s_UpdSaved[...] / Cancelar
+	DlgUpdDone,		// installed: Reiniciar la placa / Más tarde
 	InWiFiPassword = 50,	// text input: the password of s_WiFiSSID
 	InWiFiSSID,		// text input: a network's name, typed
 	InWebPassword,		// text input: the web server's password
@@ -287,6 +299,8 @@ enum TSettingId
 	SetVsync,
 	SetScaler,
 	SetPanel,
+	SetUpdCheck,
+	SetUpdKeep,
 
 	SetMachine = 200,
 	SetMemSize,
@@ -498,6 +512,16 @@ void DefineSettings (void)
 		"al momento y se guarda en boot.conf para el próximo arranque. PetSis la "
 		"enseña o la esconde solo hasta apagar.",
 		TApply::Now, { { "Oculto", "off" }, { "Visible", "on" } }, 0, LivePanel });
+
+	s_Settings.push_back ({ SetUpdCheck, FileBoot, "", "update_check", "Buscar al arrancar",
+		"Al arrancar, pregunta a GitHub si hay una versión nueva, sin parar nada: si la "
+		"hay, lo dice el título de este menú. Instalar se hace siempre desde aquí.",
+		TApply::RestartBoard, { { "No", "off" }, { "Sí", "on" } }, 0, nullptr });
+
+	s_Settings.push_back ({ SetUpdKeep, FileBoot, "", "update_keep", "Paquetes guardados",
+		"Los paquetes descargados se guardan en update/ para reinstalar o volver atrás. "
+		"Se puede guardar el instalado y el anterior, o todos.",
+		TApply::Now, { { "Actual y anterior", "two" }, { "Todos", "all" } }, 0, nullptr });
 
 	// --- Máquina: dosbox.conf -----------------------------------------------
 
@@ -1510,7 +1534,83 @@ TPage PageSistema (void)
 			      : std::string ("General MIDI"),
 		      BareMidiStatus ()),
 	};
+
+	// The updater (bare_update.cpp).
+	TBareUpdateInfo Upd;
+	BareUpdateGetInfo (&Upd);
+	const std::string GitHub =
+		Upd.bChecking ? std::string ("consultando...")
+		: !Upd.bChecked ? std::string ("sin consultar")
+		: Upd.pLatest[0] == '\0' ? std::string ("no se sabe")
+		: Upd.bNewer ? Format ("%s (nueva)", Upd.pLatest)
+		: Format ("%s (al día)", Upd.pLatest);
+	P.Items.push_back (Section ("Actualización"));
+	if (Upd.pInterrupted[0] != '\0')
+	{
+		P.Items.push_back (Info ("¡Sin terminar!", Format ("la %s", Upd.pInterrupted),
+			"Una instalación se cortó a medias: vuelve a instalar esa versión (Paquetes "
+			"guardados) antes de nada. Los kernels se escriben los últimos, así que la "
+			"placa sigue arrancando con los de antes."));
+	}
+	P.Items.push_back (Info ("En GitHub", GitHub,
+		Upd.pError[0] != '\0' ? std::string ("Última consulta: ") + Upd.pError
+				       : std::string ("La última release publicada del repositorio.")));
+	P.Items.push_back (Action ("Buscar actualización", ActUpdCheck,
+		"Pregunta a GitHub cuál es la última versión publicada. Hace falta la red."));
+	if (Upd.bNewer)
+	{
+		P.Items.push_back (Action ("Instalar la " + std::string (Upd.pLatest), ActUpdInstall,
+			"La descarga, la guarda en update/ y la instala. Tus ficheros de "
+			"configuración y las carpetas dos/ y dosbox/saves/ no se tocan."));
+	}
+	P.Items.push_back (Action ("Paquetes guardados", ActUpdSaved,
+		"Instalar otra vez un paquete de update/: para terminar una instalación cortada "
+		"o volver a una versión anterior. No hace falta la red."));
+	P.Items.push_back (SettingItem (*FindSetting (SetUpdCheck)));
+	P.Items.push_back (SettingItem (*FindSetting (SetUpdKeep)));
+	P.Items.push_back (Info ("Repositorio", Fit (Upd.pRepo, 24),
+		std::string ("De dónde salen las versiones: ") + Upd.pRepo + ". Se cambia con "
+		"update_repo en boot.conf (propietario/nombre, como en GitHub)."));
 	return P;
+}
+
+// The title when nothing else is pending: a newer release, if one is known.
+std::string UpdNewerTitle (void)
+{
+	TBareUpdateInfo Upd;
+	BareUpdateGetInfo (&Upd);
+	return Upd.bNewer ? "BM-DOS Setup   * hay una versión nueva: " + std::string (Upd.pLatest)
+			  : std::string ("BM-DOS Setup");
+}
+
+// Install s_UpdVersion, showing the progress; then say what happened.
+void UpdInstall (bool bReplaceConfig)
+{
+	const TSetting *pKeep = FindSetting (SetUpdKeep);
+	const bool bKeepAll = pKeep != nullptr && pKeep->Choices[pKeep->nPending].Value == "all";
+	char Summary[256];
+	const bool bOk = BareUpdateInstall (s_UpdVersion.c_str (), bReplaceConfig ? TRUE : FALSE,
+					    bKeepAll ? TRUE : FALSE, Summary, sizeof Summary) != FALSE;
+	if (bOk)
+	{
+		s_Menu.OpenDialog (DlgUpdDone, "Actualización", std::string (Summary) +
+				   " Se usa al reiniciar la placa.", { "Reiniciar la placa", "Más tarde" });
+		s_nApplyPending = 2;
+	}
+	else
+	{
+		s_Menu.OpenDialog (DlgInfo, "Actualización", Summary, { "Aceptar" });
+	}
+}
+
+void UpdAskHow (const std::string &Version)
+{
+	s_UpdVersion = Version;
+	s_Menu.OpenDialog (DlgUpdHow, "Instalar BM-DOS " + Version,
+			   "Tus boot.conf, dosbox.conf, cmdline.txt, config.txt y wpa_supplicant.conf: "
+			   "¿los conservas (los nuevos quedan al lado como .nuevo) o usas los nuevos "
+			   "(los tuyos quedan como .bak)?",
+			   { "Conservar los míos", "Usar los nuevos", "Cancelar" });
 }
 
 
@@ -2602,6 +2702,51 @@ void HandleEvent (const TEvent &Ev)
 		case ActSaveStay:	Save (TAfterSave::Stay); break;
 		case ActSaveRestart:	Save (TAfterSave::RebootBoard); break;
 		case ActDiscardStay:	Discard (); break;
+		case ActUpdCheck:
+		{
+			const bool bFound = BareUpdateCheck () != FALSE;
+			TBareUpdateInfo Upd;
+			BareUpdateGetInfo (&Upd);
+			if (!bFound)
+			{
+				s_Menu.OpenDialog (DlgInfo, "Actualización",
+						   std::string ("No se ha podido saber: ") + Upd.pError + ".", { "Aceptar" });
+			}
+			else if (!Upd.bNewer)
+			{
+				s_Menu.OpenDialog (DlgInfo, "Actualización",
+						   Format ("Estás al día: la última publicada es la %s.", Upd.pLatest), { "Aceptar" });
+			}
+			else
+			{
+				UpdAskHow (Upd.pLatest);
+			}
+			break;
+		}
+		case ActUpdInstall:
+		{
+			TBareUpdateInfo Upd;
+			BareUpdateGetInfo (&Upd);
+			if (Upd.pLatest[0] != '\0') UpdAskHow (Upd.pLatest);
+			break;
+		}
+		case ActUpdSaved:
+		{
+			s_nUpdSaved = BareUpdatePackages (s_UpdSaved, 3);
+			if (s_nUpdSaved == 0)
+			{
+				s_Menu.OpenDialog (DlgInfo, "Paquetes guardados",
+						   "No hay ningún paquete en update/: se guardan al instalar desde GitHub.",
+						   { "Aceptar" });
+				break;
+			}
+			std::vector<std::string> Choices;
+			for (unsigned i = 0; i < s_nUpdSaved; i++) Choices.push_back (s_UpdSaved[i]);
+			Choices.push_back ("Cancelar");
+			s_Menu.OpenDialog (DlgUpdSaved, "Paquetes guardados",
+					   Format ("Tienes la %s. ¿Cuál instalo?", BareUpdateInstalledVersion ()), Choices);
+			break;
+		}
 		case ActDiscard:	Discard (); Close (); break;
 		case ActDefaults:	{ TEvent Defaults; Defaults.Kind = TEventKind::Defaults; HandleEvent (Defaults); } break;
 		case ActDriveC:
@@ -2676,6 +2821,18 @@ void HandleEvent (const TEvent &Ev)
 			if (Ev.nChoice == 0) Save (TAfterSave::Leave);
 			else if (Ev.nChoice == 1) { Discard (); Close (); }
 		}
+		else if (Ev.nId == DlgUpdHow && !Ev.bCancelled && Ev.nChoice != 2)
+		{
+			UpdInstall (Ev.nChoice == 1);
+		}
+		else if (Ev.nId == DlgUpdSaved && !Ev.bCancelled && Ev.nChoice < static_cast<int> (s_nUpdSaved))
+		{
+			UpdAskHow (s_UpdSaved[Ev.nChoice]);
+		}
+		else if (Ev.nId == DlgUpdDone && !Ev.bCancelled && Ev.nChoice == 0)
+		{
+			BareCoreRequestReboot ();
+		}
 		else if (Ev.nId == DlgUnsavedThen && !Ev.bCancelled && Ev.nChoice != 2)
 		{
 			if (Ev.nChoice == 0)
@@ -2720,7 +2877,7 @@ void UpdateTitle (void)
 	s_Menu.Texts.Title = AnyModified () ? "BM-DOS Setup   * cambios sin guardar"
 			   : s_nApplyPending == 2 ? "BM-DOS Setup   * reinicia la placa para aplicar"
 			   : s_nApplyPending == 1 ? "BM-DOS Setup   * reinicia DOS para aplicar"
-			   : "BM-DOS Setup";
+			   : UpdNewerTitle ();
 }
 
 void Press (TKey Key)

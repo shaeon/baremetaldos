@@ -576,6 +576,26 @@ boolean CKernel::Initialize (void)
 			: "no, la red está apagada");
 	}
 
+	// The updater (bare_update.cpp): an install that did not finish
+	// (update/EN_CURSO) is said here, and boot.conf's update_check = on asks
+	// GitHub for a newer release in a task of its own - the boot does not
+	// wait for it.  The network has to be configured for that to find out.
+	{
+		const boolean bCheck = Config.bUpdateCheck && Config.Network != TBootConfig::NetOff;
+		BareUpdateInit (Config.UpdateRepo, bCheck);
+		TBareUpdateInfo Upd;
+		BareUpdateGetInfo (&Upd);
+		if (Upd.pInterrupted[0] != '\0')
+		{
+			Report ("ACTUALIZACION SIN TERMINAR: la %s - instalala otra vez (Win+F12, Sistema)",
+				Upd.pInterrupted);
+		}
+		else if (bCheck)
+		{
+			Report ("actualizacion: preguntando a GitHub (%s) en segundo plano", Config.UpdateRepo);
+		}
+	}
+
 	// --- SUPR / F2: the setup menu before DOSBox starts -----------------------
 	// Like a PC's BIOS: a short window to get into the setup, for the settings
 	// that only apply before DOSBox exists.  Win+F12 opens it later as well.

@@ -85,3 +85,20 @@ void BareProfileGet (TBareProfile *p)
 	p->nChannels = 8;
 	for (unsigned i = 0; i < 8; i++) { p->pChannelName[i] = Names[i]; p->nChannel[i] = 1000; }
 }
+
+// The updater (bare_update.cpp): the longest plausible texts.
+void BareUpdateGetInfo (TBareUpdateInfo *pInfo)
+{
+	static const char Repo[] = "un-propietario-largo/un-repositorio-largo";
+	pInfo->pRepo = Repo;
+	pInfo->bChecking = FALSE;
+	pInfo->bChecked = TRUE;
+	pInfo->pLatest = "10.99";
+	pInfo->bNewer = TRUE;
+	pInfo->pError = "";
+	pInfo->pInterrupted = "10.98";
+}
+boolean BareUpdateCheck (void) { return FALSE; }
+unsigned BareUpdatePackages (char (*)[16], unsigned) { return 0; }
+boolean BareUpdateInstall (const char *, boolean, boolean, char *pSummary, unsigned n) { if (n) pSummary[0] = 0; return FALSE; }
+const char *BareUpdateInstalledVersion (void) { return "10.98"; }

@@ -98,6 +98,12 @@ BareDiskInUse
 BareDosFileOpen
 BareDosCurrentPsp
 BareDosForgetDevices
+BareUpdateInit
+BareUpdateGetInfo
+BareUpdateCheck
+BareUpdatePackages
+BareUpdateInstall
+BareUpdateInstalledVersion
 # The profiler reads the ARM timer with inline asm: board only.
 BareProfileClock
 BareProfileAdd

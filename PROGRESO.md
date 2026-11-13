@@ -183,7 +183,16 @@ en un fichero (BMDOS_VERSION, empieza en 0.80, +0.01 cada release), artefacto
 subido como CARPETA (no zip dentro de zip), release BORRADOR con un único
 BM-DOS-<v>-sd.zip (vale para el actualizador y para descomprimir en la SD);
 el actualizador vuelve a buscar -sd.zip; el workflow para si la etiqueta no
-coincide con BMDOS_VERSION.
+coincide con BMDOS_VERSION.  HECHO (commit "release: BM-DOS 0.80...").
+F3 hecha en el código: boot.conf update_repo / update_check / update_keep (+4
+casos); src/platform/bare_update.cpp (consulta: plan B web y luego API; al
+arrancar en una tarea; descarga con progreso a memoria, guarda en update/,
+instala con CUpdater, poda; sin certs/cacert.pem NO descarga; EN_CURSO al
+arrancar); menú Sistema, sección "Actualización" (En GitHub, Buscar, Instalar
+la X, Paquetes guardados, Buscar al arrancar, Paquetes guardados, Repositorio)
+y título "* hay una versión nueva"; kernel llama BareUpdateInit tras la red.
+Compilado, check-host desde cero bien, commit "update: the setup menu...".  F4: probar en
+placa (hace falta publicar la release v0.80 y luego una v0.81).
 Preguntas hechas: repositorio por defecto (propuesto shaeon/baremetaldos,
 configurable), numeración de nuestras etiquetas, ficheros protegidos (5 de
 configuración + dos/ entero), sitio en el menú (Sistema), fases F1-F4.
