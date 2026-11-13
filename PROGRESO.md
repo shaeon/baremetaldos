@@ -315,6 +315,22 @@ YA está en third_party/dosbox-core/src/hardware/voodoo*.cpp, excluido en el
 Makefile (WITH_VOODOO=0, "OpenGL"): mirar si su ruta por software compila
 (punto 23).
 
+## Upstream (mmoroca) desde nuestra base v0.78 (mirado el 13-nov)
+
+Dos commits: 444e70d (quita un script local) y 4301875 = v0.80
+("2026-11-11.80"): MIDI General MIDI con TinySoundFont (tsf.h, solo cabecera)
+dentro de midi_stub.cpp; lector de SoundFont rápido (búfer propio de 64 KB
+alineado a 64, _IONBF, reintento de bloques con EIO: 9863 ms -> 3836 ms con
+31 MB); guarda de memoria antes de cargar (Circle hace panic sin memoria, no
+devuelve NULL); cabecera del arranque en una caja con glifos CP437 y columna
+que se desplaza (bare_video.cpp); setup.sh genera circle/memory.h; READMEs y
+dosbox.conf documentan [midi]; pruebas check-sf2reader y status_test.
+Choca con lo nuestro: nuestro MIDI es FluidSynth + Munt en el núcleo 1
+(midi_stub.cpp, bare_midi.cpp), y bare_video.cpp, Makefile, READMEs,
+dosbox.conf, bare_env.h y bare_sysinfo.cpp también los hemos cambiado.
+Aprovechable: su forma de leer el SoundFont rápido y con reintentos, y la
+guarda de memoria (nuestro FluidSynth carga con fopen/fread de newlib).
+
 ## Notas técnicas
 
 - Compilar: `export PATH=$PWD/opt/arm-gnu-toolchain-15.2.rel1-x86_64-aarch64-none-elf/bin:$PATH; make -j2 RASPPI=4`.
