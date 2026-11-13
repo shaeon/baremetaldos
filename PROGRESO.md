@@ -142,6 +142,21 @@ Arreglo: override PREFIX/PREFIX64 con la ruta completa de opt/ (Makefile).
 Comprobado: compila entero sin el toolchain en el PATH, kernel del mismo
 tamaño (6930312) que con él.
 
+**Punto 21: actualizador desde GitHub, importado de ZXMetalCircle (pedido
+13-nov) - DISEÑO PROPUESTO, esperando respuesta del usuario.**
+Origen (github.com/shaeon/ZXMetalCircle, src/): updater.cpp/.h (reglas:
+CRC de todo antes de tocar, solo lo que cambia, .new + rename, kernels al
+final, update/EN_CURSO, configuración como .nuevo), zipfile + inflate,
+updatefs.cpp (FatFs), download/httpsclient + circleglue (Mbed TLS propio en
+third_party/mbedtls con zxmc_config.h), kernelupdate.cpp (pantalla: NO se
+trae, se rehace en nuestro menú).  Nuestro lado: circle-stdlib trae fuentes de
+mbedtls sin compilar; el workflow YA publica release en etiqueta v*
+(BM-DOS-card.zip + kernels).  Etiquetas: shaeon v0.66/v0.67/v0.78; mmoroca
+hasta v0.80 (sus releases no llevan nuestro trabajo).
+Preguntas hechas: repositorio por defecto (propuesto shaeon/baremetaldos,
+configurable), numeración de nuestras etiquetas, ficheros protegidos (5 de
+configuración + dos/ entero), sitio en el menú (Sistema), fases F1-F4.
+
 ### Revisión completa del proyecto (pedida por el usuario, 12-nov)
 
 "Ahora que funciona y estamos afinando: revísalo y ve arreglando lo que veas;
