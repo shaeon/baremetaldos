@@ -166,10 +166,13 @@ mayoría de las distribuciones: son GCC 13/14 y la compilación falla.
 
 `.github/workflows/build.yml` lo compila todo en GitHub Actions en cada push:
 `make check-host`, después el núcleo para Pi 3, Pi 4 y Pi 5 en paralelo (con MIDI),
-y al final `BM-DOS-card.zip`: la tarjeta con el firmware, los ficheros de
-configuración y los tres núcleos, lista para descomprimir en una tarjeta FAT32. Los
-núcleos y el zip se descargan desde la página de la ejecución (*Artifacts*), y una
-etiqueta `v*` los publica como release.
+y al final la tarjeta con el firmware, los ficheros de configuración y los tres
+núcleos. En la página de la ejecución (*Artifacts*), `BM-DOS-<versión>-sd` es la
+tarjeta: se descarga como un zip para descomprimir en una tarjeta FAT32. Una
+etiqueta `v*`, que tiene que coincidir con el fichero `BMDOS_VERSION` (`v0.80`),
+crea además un borrador de release con `BM-DOS-<versión>-sd.zip`: el mismo
+contenido, que sirve para descomprimirlo en la SD y para el actualizador del
+menú. La release cuenta para el actualizador cuando se publica.
 
 Lo lento queda en caché (toolchain, circle-stdlib, las librerías MIDI): la primera
 ejecución de cada placa tarda alrededor de una hora, las siguientes unos minutos. En

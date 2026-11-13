@@ -27,9 +27,10 @@
 // - la lista de ficheros de configuración, la de arriba;
 // - esxdos_i/ (comparado con el paquete anterior) pasa a ser dos/ (nunca se
 //   toca), así que Install ya no recibe el paquete anterior;
-// - el paquete de la release es BM-DOS-card.zip (el que publica
-//   .github/workflows/build.yml), y en update/ se guarda como
-//   BM-DOS-<versión>-card.zip.
+// - el paquete se llama BM-DOS-<versión>-sd.zip, en la release (el que
+//   publica .github/workflows/build.yml, con la versión de BMDOS_VERSION) y
+//   en update/; es la tarjeta entera, que también se puede descomprimir tal
+//   cual en una SD.
 // - Mientras dura, existe update/EN_CURSO (con la versión), para saber al
 //   arrancar que una instalación no terminó.
 //
@@ -95,14 +96,14 @@ public:
 	static int CompareVersions (const char *a, const char *b);
 
 	// De la respuesta de api.github.com/repos/.../releases/latest: la versión
-	// ("v1.07" -> "1.07") y la dirección del zip de la tarjeta (BM-DOS-card.zip)
+	// ("v0.80" -> "0.80") y la dirección del zip de la SD (BM-DOS-0.80-sd.zip)
 	static boolean ParseRelease (const char *pJSON, unsigned nLength,
 				     char *pVersion, unsigned nVersionSize,
 				     char *pURL, unsigned nURLSize);
 
 	// Plan B si la API falla: github.com/.../releases/latest redirige a
 	// .../releases/tag/v1.07; de esa dirección, la versión y la del zip
-	// (.../releases/download/v1.07/BM-DOS-card.zip)
+	// (.../releases/download/v0.80/BM-DOS-0.80-sd.zip)
 	static boolean ParseTagURL (const char *pFinalURL,
 				    char *pVersion, unsigned nVersionSize,
 				    char *pURL, unsigned nURLSize);

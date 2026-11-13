@@ -47,9 +47,14 @@ PROJECT_SNAPSHOT_DATE ?= 2026-11-10
 # with uncommitted changes).  It goes into a generated
 # header that is rewritten only when it changes, so that the sources showing
 # it are rebuilt then - and only then.
+# BM-DOS's own version (the fork's numbering, not upstream's): BMDOS_VERSION,
+# bumped by hand by 0.01 for each release.  The release workflow checks that
+# the tag (v0.80) and this file agree, and names the card's zip after it
+# (BM-DOS-0.80-sd.zip); the updater compares it with GitHub's latest release.
+BMDOS_VERSION := $(shell cat $(CURDIR)/BMDOS_VERSION 2>/dev/null || echo 0.00)
 BMDOS_COMMIT := $(shell c=$$(git -C $(CURDIR) rev-parse --short=7 HEAD 2>/dev/null) && { git -C $(CURDIR) diff --quiet HEAD 2>/dev/null && echo $$c || echo $$c+; } || echo sin-git)
 $(shell mkdir -p $(CURDIR)/build && \
-	printf '#define BMDOS_COMMIT "%s"\n#define BMDOS_SNAPSHOT "%s"\n' '$(BMDOS_COMMIT)' '$(PROJECT_SNAPSHOT)' \
+	printf '#define BMDOS_VERSION "%s"\n#define BMDOS_COMMIT "%s"\n#define BMDOS_SNAPSHOT "%s"\n' '$(BMDOS_VERSION)' '$(BMDOS_COMMIT)' '$(PROJECT_SNAPSHOT)' \
 		> $(CURDIR)/build/bmdos_version.h.tmp && \
 	(cmp -s $(CURDIR)/build/bmdos_version.h.tmp $(CURDIR)/build/bmdos_version.h \
 	 || mv $(CURDIR)/build/bmdos_version.h.tmp $(CURDIR)/build/bmdos_version.h))

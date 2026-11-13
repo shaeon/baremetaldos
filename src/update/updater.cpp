@@ -381,7 +381,7 @@ boolean CUpdater::ParseRelease (const char *pJSON, unsigned nLength,
 	while ((p = FindString (p, pEnd, "browser_download_url", pURL, nURLSize)) != 0)
 	{
 		unsigned n = strlen (pURL);
-		if (n > 16 && EqualNoCase (pURL + n - 16, "/BM-DOS-card.zip"))
+		if (n > 7 && EqualNoCase (pURL + n - 7, "-sd.zip"))
 		{
 			return TRUE;
 		}
@@ -391,7 +391,7 @@ boolean CUpdater::ParseRelease (const char *pJSON, unsigned nLength,
 
 void CUpdater::PackageName (const char *pVersion, char *pName, unsigned nSize)
 {
-	Join (pName, nSize, UPDATE_DIR, "/BM-DOS-", pVersion, "-card.zip", (const char *) 0);
+	Join (pName, nSize, UPDATE_DIR, "/BM-DOS-", pVersion, "-sd.zip", (const char *) 0);
 }
 
 boolean CUpdater::ParseTagURL (const char *pFinalURL,
@@ -421,6 +421,7 @@ boolean CUpdater::ParseTagURL (const char *pFinalURL,
 	unsigned nBase = (unsigned) (p - pFinalURL) < sizeof Base ? (unsigned) (p - pFinalURL) : sizeof Base - 1;
 	memcpy (Base, pFinalURL, nBase);
 	Base[nBase] = '\0';
-	Join (pURL, nURLSize, Base, "/releases/download/", Tag, "/BM-DOS-card.zip", (const char *) 0);
+	Join (pURL, nURLSize, Base, "/releases/download/", Tag, "/BM-DOS-", pVersion, "-sd.zip",
+	      (const char *) 0);
 	return TRUE;
 }

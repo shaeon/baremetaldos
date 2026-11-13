@@ -167,10 +167,12 @@ from most distributions: those are GCC 13/14 and the build will fail.
 
 `.github/workflows/build.yml` builds everything on GitHub Actions on every push:
 `make check-host`, then the kernel for the Pi 3, the Pi 4 and the Pi 5 in parallel
-(with MIDI), and finally `BM-DOS-card.zip` - the card with the firmware, the
-configuration files and the three kernels, ready to unzip onto a FAT32 card. The
-kernels and the zip are downloadable from the run's page (*Artifacts*), and a tag
-`v*` publishes them as a release.
+(with MIDI), and finally the card with the firmware, the configuration files and
+the three kernels.  On the run's page (*Artifacts*), `BM-DOS-<version>-sd` is the
+card: it downloads as one zip to unzip onto a FAT32 card.  A `v*` tag, which must
+match the `BMDOS_VERSION` file (`v0.80`), also makes a draft release with
+`BM-DOS-<version>-sd.zip` - the same contents, to unzip onto an SD or for the
+setup menu's updater.  The updater sees a release once it is published.
 
 The slow parts are cached (toolchain, circle-stdlib, the MIDI libraries): the first
 run of each board takes about an hour, later ones a few minutes. On a fork, Actions

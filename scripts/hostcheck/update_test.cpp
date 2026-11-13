@@ -264,22 +264,22 @@ int main (int argc, char **argv)
 			" \"tag_name\": \"v1.01\", \"name\": \"BM-DOS 1.01\", \"draft\": false,\n"
 			" \"assets\": [ {\"name\": \"kernel8-rpi4.img\", \"browser_download_url\": "
 			"\"https://github.com/shaeon/baremetaldos/releases/download/v1.01/kernel8-rpi4.img\"},\n"
-			"  {\"name\": \"BM-DOS-card.zip\", \"size\": 25000000,\n"
-			"   \"browser_download_url\": \"https://github.com/shaeon/baremetaldos/releases/download/v1.01/BM-DOS-card.zip\"} ]}";
+			"  {\"name\": \"BM-DOS-1.01-sd.zip\", \"size\": 25000000,\n"
+			"   \"browser_download_url\": \"https://github.com/shaeon/baremetaldos/releases/download/v1.01/BM-DOS-1.01-sd.zip\"} ]}";
 		char V[16], U[256];
 		bool bOK = CUpdater::ParseRelease (JSON, strlen (JSON), V, sizeof V, U, sizeof U);
 		chk ("API: versión 1.01 y el zip de la tarjeta (no un kernel suelto)",
 		     bOK && strcmp (V, "1.01") == 0
-		     && strcmp (U, "https://github.com/shaeon/baremetaldos/releases/download/v1.01/BM-DOS-card.zip") == 0);
+		     && strcmp (U, "https://github.com/shaeon/baremetaldos/releases/download/v1.01/BM-DOS-1.01-sd.zip") == 0);
 		const char *Limit = "{\"message\":\"API rate limit exceeded for 1.2.3.4.\"}";
 		chk ("API: límite de consultas -> no hay versión", !CUpdater::ParseRelease (Limit, strlen (Limit), V, sizeof V, U, sizeof U));
 		bOK = CUpdater::ParseTagURL ("https://github.com/shaeon/baremetaldos/releases/tag/v1.01", V, sizeof V, U, sizeof U);
 		chk ("plan B: de .../releases/tag/v1.01, la versión y el zip",
 		     bOK && strcmp (V, "1.01") == 0
-		     && strcmp (U, "https://github.com/shaeon/baremetaldos/releases/download/v1.01/BM-DOS-card.zip") == 0);
+		     && strcmp (U, "https://github.com/shaeon/baremetaldos/releases/download/v1.01/BM-DOS-1.01-sd.zip") == 0);
 		char N[64];
 		CUpdater::PackageName ("1.01", N, sizeof N);
-		chk ("nombre guardado: update/BM-DOS-1.01-card.zip", strcmp (N, "update/BM-DOS-1.01-card.zip") == 0);
+		chk ("nombre guardado: update/BM-DOS-1.01-sd.zip", strcmp (N, "update/BM-DOS-1.01-sd.zip") == 0);
 	}
 
 	// 10. Real deflate: a zip made by Python's zipfile (argv[1]) and the

@@ -14,7 +14,9 @@
 # patches, so a change to any of them rebuilds it.  The first run of each board
 # takes about an hour; a run with warm caches is a few minutes.
 #
-# A tag v* also publishes a GitHub release with the card zip and the kernels.
+# A tag v* (it must match BMDOS_VERSION: v0.80) also makes a DRAFT GitHub
+# release with BM-DOS-<version>-sd.zip, the whole card - for the updater, or to
+# unzip onto an SD.  The artifact is the card's folder (no zip inside a zip).
 #
 # Shaeon (Carlos Palmero) 2026, for BM-DOS by @mmoroca.  GPL-3.0-or-later.
 
@@ -209,9 +211,29 @@ jobs:
     needs: [host-checks, kernel]
     runs-on: ubuntu-24.04
     steps:
+      # Only BMDOS_VERSION is needed from the repository here.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: BMDOS_VERSION
+          sparse-checkout-cone-mode: false
+
       - uses: actions/download-artifact@v4
         with:
           path: dl
+
+      # The version: BMDOS_VERSION (0.80, 0.81 ... - the fork's own numbering).
+      # A v* tag must match it: a release named after one version holding
+      # kernels that say another would confuse the updater.
+      - name: Version
+        id: version
+        run: |
+          v=$(tr -d ' \r\n' < BMDOS_VERSION)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "BM-DOS $v"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v$v" ]; then
+            echo "::error::the tag ${GITHUB_REF_NAME} does not match BMDOS_VERSION ($v): bump the file or fix the tag"
+            exit 1
+          fi
 
       - name: Assemble the card
         run: |
@@ -221,19 +243,26 @@ jobs:
           cp dl/kernel-rpi4/kernel8-rpi4.img card/
           cp dl/kernel-rpi5/kernel_2712.img card/
           ls -l card
-          (cd card && zip -qr ../BM-DOS-card.zip .)
 
+      # The release's one file, as ZXMetalCircle does: the whole card in a zip,
+      # for the updater (Win+F12, Sistema, Actualización) or to unzip as it is
+      # onto a FAT32 SD.
+      - name: The card's zip
+        run: (cd card && zip -qr -X "../BM-DOS-${{ steps.version.outputs.version }}-sd.zip" .)
+
+      # The artifact is the card's FOLDER: GitHub zips artifacts when they are
+      # downloaded, so uploading the zip made above gave a zip inside a zip.
       - uses: actions/upload-artifact@v4
         with:
-          name: BM-DOS-card
-          path: BM-DOS-card.zip
+          name: BM-DOS-${{ steps.version.outputs.version }}-sd
+          path: card/
 
-      - name: Release
+      # A draft, as ZXMetalCircle does: it becomes "latest" - what the updater
+      # finds - only when it is published by hand.
+      - name: Draft release (v* tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            BM-DOS-card.zip
-            card/kernel8.img
-            card/kernel8-rpi4.img
-            card/kernel_2712.img
+          draft: true
+          name: BM-DOS ${{ steps.version.outputs.version }}
+          files: BM-DOS-${{ steps.version.outputs.version }}-sd.zip

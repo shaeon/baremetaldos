@@ -178,7 +178,12 @@ se toca.  check-update-live (red, fuera de check-host; CERTS=- con proxy): API,
 plan B, descarga con redirección y un zip real de 67 entradas, todo bien.
 Tu repo NO tiene releases publicadas todavía (solo etiquetas).
 Kernel compilado con Mbed TLS (108 ficheros, +190 KB); check-host desde cero bien.
-SIGUIENTE: F3 (menú, opciones en boot.conf, aviso al arrancar).
+F3 APROBADA (13-nov), EN CURSO.  Antes, pedido: paquete como ZXMC - versión
+en un fichero (BMDOS_VERSION, empieza en 0.80, +0.01 cada release), artefacto
+subido como CARPETA (no zip dentro de zip), release BORRADOR con un único
+BM-DOS-<v>-sd.zip (vale para el actualizador y para descomprimir en la SD);
+el actualizador vuelve a buscar -sd.zip; el workflow para si la etiqueta no
+coincide con BMDOS_VERSION.
 Preguntas hechas: repositorio por defecto (propuesto shaeon/baremetaldos,
 configurable), numeración de nuestras etiquetas, ficheros protegidos (5 de
 configuración + dos/ entero), sitio en el menú (Sistema), fases F1-F4.

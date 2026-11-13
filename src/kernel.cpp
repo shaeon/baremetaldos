@@ -208,6 +208,9 @@ void CKernel::Cleanup (void)
 #ifndef BMDOS_COMMIT
 #define BMDOS_COMMIT "sin-git"
 #endif
+#ifndef BMDOS_VERSION
+#define BMDOS_VERSION "0.00"
+#endif
 
 #ifndef DOSBOX_SNAPSHOT
 #define DOSBOX_SNAPSHOT "unknown"
@@ -468,11 +471,12 @@ boolean CKernel::Initialize (void)
 	// the middle of the screen with a quiet one (boot_log = quiet | off).
 	static char LogoCaption[80];
 	snprintf (LogoCaption, sizeof LogoCaption, "BM-DOS %s (%s)  -  DOSBox on baremetal Raspberry Pi",
-		  DOSBOX_SNAPSHOT, BMDOS_COMMIT);
+		  BMDOS_VERSION, BMDOS_COMMIT);
 	BareVideoSetBootLogo (m_nBootLogLevel < 2 ? TRUE : FALSE, LogoCaption);
 
 	BareVideoStatusReset ();
-	Report ("BM-DOS %s (%s) - DOSBox on baremetal Raspberry Pi", DOSBOX_SNAPSHOT, BMDOS_COMMIT);
+	Report ("BM-DOS %s (%s, base %s) - DOSBox on baremetal Raspberry Pi", BMDOS_VERSION,
+		BMDOS_COMMIT, DOSBOX_SNAPSHOT);
 	Report ("by @mmoroca & arena.ai 2026");
 	Report ("Display %ux%u", Config.nWidth, Config.nHeight);
 
