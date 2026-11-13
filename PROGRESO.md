@@ -153,8 +153,12 @@ trae, se rehace en nuestro menú).  Nuestro lado: circle-stdlib trae fuentes de
 mbedtls sin compilar; el workflow YA publica release en etiqueta v*
 (BM-DOS-card.zip + kernels).  Etiquetas: shaeon v0.66/v0.67/v0.78; mmoroca
 hasta v0.80 (sus releases no llevan nuestro trabajo).
-DECIDIDO (13-nov): numeración PROPIA (no la de mmoroca).  Faltan: repo por
-defecto, ficheros protegidos, sitio en el menú.
+DECIDIDO (13-nov): numeración PROPIA (no la de mmoroca); repositorio por
+defecto shaeon/baremetaldos (configurable); protegidos boot.conf, dosbox.conf,
+cmdline.txt, config.txt, wpa_supplicant.conf (el nuevo como .nuevo, con opción
+de usar los nuevos y guardar los del usuario como .bak) y dos/ entera; sección
+"Actualización" en Sistema.  APROBADO: F1 -> F4.
+También pedido: valores por defecto con GUS, MIDI y MPU-401 inteligente.
 Preguntas hechas: repositorio por defecto (propuesto shaeon/baremetaldos,
 configurable), numeración de nuestras etiquetas, ficheros protegidos (5 de
 configuración + dos/ entero), sitio en el menú (Sistema), fases F1-F4.

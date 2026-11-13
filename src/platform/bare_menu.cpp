@@ -613,7 +613,7 @@ void DefineSettings (void)
 		"Para su música hace falta la carpeta ULTRASND con los patches en C:\\ULTRASND "
 		"(la de los discos de Gravis). Los juegos que suben sus propios sonidos, como "
 		"Second Reality, no los necesitan.",
-		TApply::RestartDOSBox, { { "No", "false" }, { "Sí", "true" } }, 0, nullptr });
+		TApply::RestartDOSBox, { { "No", "false" }, { "Sí", "true" } }, 1, nullptr });	// on by default
 
 	s_Settings.push_back ({ SetSpeaker, FileDOSBox, "speaker", "pcspeaker", "Altavoz del PC",
 		"El pitido del PC. Algunos juegos lo usan para todo el sonido.",
@@ -629,7 +629,7 @@ void DefineSettings (void)
 		"el juego, elige la música General MIDI o Roland en el puerto 330.",
 		TApply::RestartDOSBox,
 		{ { "Ninguno", "none" }, { "General MIDI", "fluidsynth" }, { "Roland MT-32", "mt32" } },
-		0, nullptr });
+		1, nullptr });	// General MIDI by default
 
 	s_Settings.push_back ({ SetMpu, FileDOSBox, "midi", "mpu401", "  MPU-401",
 		"La interfaz MIDI que ven los juegos. Inteligente sirve para todos; UART solo para "
