@@ -121,6 +121,7 @@ EOF
 
 cat > circle/memory.h <<'EOF'
 #pragma once
+#include <cstddef>
 #include <circle/types.h>
 #define HEAP_LOW	0
 #define HEAP_HIGH	1
