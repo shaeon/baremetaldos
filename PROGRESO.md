@@ -211,6 +211,23 @@ Preguntas hechas: repositorio por defecto (propuesto shaeon/baremetaldos,
 configurable), numeración de nuestras etiquetas, ficheros protegidos (5 de
 configuración + dos/ entero), sitio en el menú (Sistema), fases F1-F4.
 
+**Arranque estilo PC (usuario, 13-nov) - EN DISEÑO.**  Quiere: arrancar más
+rápido; en vez del logo como splash, pantalla tipo POST de BIOS con el logo
+BM-DOS en una esquina; tras la pausa de SUPR, "Iniciando BM-DOS..." como MS-DOS
+y debajo el log; revisar el tiempo de arranque y el WiFi (sospecha en la 0.78).
+Su GitHub ya está en 4917f91 (bundle aplicado).
+Maquetas enviadas (outputs/arranque-1-post.png, arranque-2-iniciando.png;
+generador /tmp/claude-0/mock/mock.py, fuente 8x16 de Circle + logo real).
+Plan propuesto: A) log con tiempos "[ s,cc]" + copia en SD:/bmdos-arranque.txt
+para medir en la placa; B) las dos pantallas (POST con logo arriba a la
+derecha y "Pulsa SUPR o F2"; luego "Iniciando BM-DOS..." + log); C) acelerar
+según los datos: candidatos SoundFont cargado en el arranque (ahora General
+MIDI por defecto: 4-10 s con un .sf2 grande -> cargarlo en segundo plano en el
+núcleo 1), CBcm4343Device::Initialize síncrono (firmware WiFi desde la SD),
+usbpowerdelay=500 en cmdline.txt, setup_wait 2 s.  WiFi: lo lento de la 0.78
+eran las esperas que giraban (arreglado en c8751c6); medir con A.
+Esperando visto bueno del usuario.
+
 ### Revisión completa del proyecto (pedida por el usuario, 12-nov)
 
 "Ahora que funciona y estamos afinando: revísalo y ve arreglando lo que veas;
