@@ -64,7 +64,7 @@ boolean CUpdater::IsConfigFile (const char *pPath)
 {
 	static const char *Config[] =
 	{
-		"boot.conf", "dosbox.conf", "cmdline.txt", "config.txt", "wpa_supplicant.conf"
+		"boot.conf", "dosbox/dosbox.conf", "cmdline.txt", "config.txt", "wpa_supplicant.conf"
 	};
 	for (unsigned i = 0; i < sizeof Config / sizeof Config[0]; i++)
 	{
@@ -85,7 +85,9 @@ boolean CUpdater::IsKernel (const char *pPath)
 
 boolean CUpdater::InUserArea (const char *pPath)
 {
-	return StartsNoCase (pPath, "dos/");
+	// dos/ is C:, with the user's games; dosbox/saves/ holds their saved
+	// games (make-sd.sh lays the card out so).
+	return StartsNoCase (pPath, "dos/") || StartsNoCase (pPath, "dosbox/saves/");
 }
 
 int CUpdater::CompareVersions (const char *a, const char *b)

@@ -261,6 +261,13 @@ if [ ! -f "$STAGE/wpa_supplicant.conf" ]; then
 	cp "$REPO_ROOT/sd/wpa_supplicant.conf" "$STAGE/wpa_supplicant.conf"
 fi
 
+# The updater's root certificates (Mozilla's list, curl's cacert.pem, plus
+# three DigiCert roots GitHub has used; see the note at its end): HTTPS to
+# GitHub is checked against them (src/update/).  Always copied: they are not
+# the user's configuration.
+mkdir -p "$STAGE/certs"
+cp "$REPO_ROOT/sd/certs/cacert.pem" "$STAGE/certs/cacert.pem"
+
 # A README on the card, because in six months you will not remember which
 # directory is mounted as C:.
 cat > "$STAGE/LEEME.txt" <<'EOF'

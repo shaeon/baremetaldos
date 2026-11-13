@@ -16,12 +16,12 @@
 // - Solo se copian los ficheros que cambian (tamaño o CRC distintos).
 // - Cada fichero se escribe con otro nombre (.new) y luego se renombra.
 // - Los kernels se copian los últimos.
-// - Los ficheros de configuración (boot.conf, dosbox.conf, cmdline.txt,
+// - Los ficheros de configuración (boot.conf, dosbox/dosbox.conf, cmdline.txt,
 //   config.txt y wpa_supplicant.conf, que guarda la contraseña del WiFi) no
 //   se sobrescriben: el nuevo se deja al lado como .nuevo; o, si se pide, se
 //   pone el nuevo y el del usuario queda como .bak.
-// - dos/ es la unidad C: del usuario, con sus juegos: no se toca nunca, traiga
-//   lo que traiga el paquete.
+// - dos/ es la unidad C: del usuario, con sus juegos, y dosbox/saves/ guarda
+//   sus partidas: no se tocan nunca, traiga lo que traiga el paquete.
 //
 // Cambios para BM-DOS (frente a ZXMetalCircle 61494ca):
 // - la lista de ficheros de configuración, la de arriba;
@@ -89,7 +89,7 @@ public:
 
 	static boolean IsConfigFile (const char *pPath);
 	static boolean IsKernel (const char *pPath);
-	static boolean InUserArea (const char *pPath);	// dos/: nunca se toca
+	static boolean InUserArea (const char *pPath);	// dos/, dosbox/saves/: nunca
 
 	// < 0, 0 o > 0 según a sea anterior, igual o posterior a b ("1.06")
 	static int CompareVersions (const char *a, const char *b);

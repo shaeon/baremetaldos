@@ -152,11 +152,12 @@ int main (int argc, char **argv)
 
 	TFiles V1 = {
 		{"kernel8-rpi4.img", "kernel 1"}, {"kernel_2712.img", "kernel5 1"},
-		{"boot.conf", "network = wifi"}, {"dosbox.conf", "[sblaster]"},
+		{"boot.conf", "network = wifi"}, {"dosbox/dosbox.conf", "[sblaster]"},
 		{"cmdline.txt", "keymap=es"}, {"config.txt", "arm_64bit=1"},
 		{"wpa_supplicant.conf", "country=ES"},
 		{"start4.elf", "firmware 1"}, {"README.md", "leeme 1"},
 		{"dos/AUTOEXEC.BAT", "@echo off"}, {"dos/README.TXT", "pon aqui tus juegos"},
+		{"dosbox/saves/LEEME.TXT", "partidas"},
 	};
 	std::string Zip1 = MakeZip (V1);
 
@@ -169,6 +170,8 @@ int main (int argc, char **argv)
 	     ReadText (fs, "start4.elf") == "firmware 1" && ReadText (fs, "boot.conf") == "network = wifi");
 	chk ("dos/: el AUTOEXEC.BAT del usuario no se toca", ReadText (fs, "dos/AUTOEXEC.BAT") == "C:\\GAMES\\DOOM\\DOOM.EXE");
 	chk ("dos/: tampoco se añade nada", ReadText (fs, "dos/README.TXT") == "(no existe)");
+	chk ("dosbox/saves/ (las partidas): no se toca", ReadText (fs, "dosbox/saves/LEEME.TXT") == "(no existe)");
+	chk ("dosbox/dosbox.conf: en su carpeta", ReadText (fs, "dosbox/dosbox.conf") == "[sblaster]");
 	chk ("instalar: no queda la marca update/EN_CURSO", ReadText (fs, UPDATE_MARKER) == "(no existe)");
 	chk ("instalar: los kernels, los últimos",
 	     fs.Written.size () >= 3 && CUpdater::IsKernel (fs.Written[fs.Written.size () - 1].c_str ())
@@ -184,11 +187,13 @@ int main (int argc, char **argv)
 
 	// 3. The user changes his settings; the next version changes several things
 	WriteText (fs, "boot.conf", "network = ethernet");
+	WriteText (fs, "dosbox/dosbox.conf", "[sblaster]\nsbtype=sb16 # mío");
 	WriteText (fs, "wpa_supplicant.conf", "country=ES\nnetwork={ssid=\"casa\" psk=\"secreta\"}");
 	TFiles V2 = V1;
 	V2[0].second = "kernel 2";				// kernel8-rpi4.img
 	V2[2].second = "network = wifi\nweb_server = off";	// boot.conf, new
 	V2[6].second = "country=ES\n# plantilla";		// wpa_supplicant.conf, new
+	V2[3].second = "[sblaster]\n# nuevo";			// dosbox/dosbox.conf, new
 	V2[7].second = "firmware 2";				// start4.elf
 	V2[9].second = "@echo on";				// dos/AUTOEXEC.BAT
 	V2.push_back ({"certs/ca.pem", "-----BEGIN"});		// a new file
@@ -201,9 +206,10 @@ int main (int argc, char **argv)
 	     && ReadText (fs, "boot.conf.nuevo") == "network = wifi\nweb_server = off");
 	chk ("wpa_supplicant.conf (la contraseña del WiFi) intacto",
 	     ReadText (fs, "wpa_supplicant.conf") == "country=ES\nnetwork={ssid=\"casa\" psk=\"secreta\"}");
-	chk ("dosbox.conf, igual que el nuevo: ni se toca ni .nuevo",
-	     !WasWritten (fs, "dosbox.conf") && ReadText (fs, "dosbox.conf.nuevo") == "(no existe)");
-	chk ("se avisa de los dos .nuevo", R.nNotes == 2);
+	chk ("dosbox/dosbox.conf del usuario intacto y el nuevo en dosbox/dosbox.conf.nuevo",
+	     ReadText (fs, "dosbox/dosbox.conf") == "[sblaster]\nsbtype=sb16 # mío"
+	     && ReadText (fs, "dosbox/dosbox.conf.nuevo") == "[sblaster]\n# nuevo");
+	chk ("se avisa de los tres .nuevo", R.nNotes == 3);
 	chk ("firmware y kernel cambiados se copian",
 	     ReadText (fs, "start4.elf") == "firmware 2" && ReadText (fs, "kernel8-rpi4.img") == "kernel 2");
 	chk ("lo que no cambia no se escribe",

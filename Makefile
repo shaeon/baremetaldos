@@ -68,6 +68,18 @@ DOSBOX_DIR	?= $(CURDIR)/third_party/dosbox-core
 # Pinned upstream revision.  Bump deliberately, not automatically: the stub
 # layer and the minimal libretro.h have to be re-checked against it.
 DOSBOX_REV	?= $(shell cat ./DOSBOX_REV)
+
+# Mbed TLS, for the updater's HTTPS (src/update/): the official release at a
+# fixed tag, fetched by make fetch like dosbox-core - not kept in the repo.
+# ZXMetalCircle, where the updater comes from, carries a copy that was checked
+# to be identical to this tag.  Built with our own configuration
+# (src/update/bmdos_mbedtls_config.h: a TLS 1.2 client and nothing more).
+MBEDTLS_REPO	:= https://github.com/Mbed-TLS/mbedtls.git
+MBEDTLS_REV	?= $(shell cat ./MBEDTLS_REV)
+MBEDTLS_DIR	:= $(CURDIR)/third_party/mbedtls
+MBEDTLS_SRCS	:= $(wildcard $(MBEDTLS_DIR)/library/*.c)
+MBEDTLS_FLAGS	:= -I$(MBEDTLS_DIR)/include -I$(CURDIR)/src/update \
+		   -DMBEDTLS_CONFIG_FILE='"bmdos_mbedtls_config.h"'
 DOSBOX_REPO	?= https://github.com/realnc/dosbox-core.git
 DOSBOX_BRANCH	?= libretro
 
@@ -604,7 +616,12 @@ endif
 
 APP_DEFINES = -DDOSBOX_SNAPSHOT=\"$(PROJECT_SNAPSHOT)\" $(BARE_AUDIO_DEVICE_DEFINE) $(BARE_MIDI_DEFINE)
 
-CXXFLAGS_APP = $(CPPFLAGS) -std=gnu++23 $(APP_INCLUDES) $(BARE_MIDI_INCLUDES) $(APP_DEFINES) $(APP_WARNINGS)
+CXXFLAGS_APP = $(CPPFLAGS) -std=gnu++23 $(APP_INCLUDES) $(BARE_MIDI_INCLUDES) $(APP_DEFINES) $(APP_WARNINGS) \
+	       $(MBEDTLS_FLAGS)
+
+# Mbed TLS's own C sources: Circle's C flags and its configuration.  Its
+# warnings are not ours to fix (-w): it is the release as published.
+CFLAGS_MBEDTLS = $(CFLAGS) $(MBEDTLS_FLAGS) -w
 
 # ---------------------------------------------------------------------------
 # Sources
@@ -635,6 +652,8 @@ APP_SRCS := \
 	src/update/updatefs.cpp \
 	src/update/zipfile.cpp \
 	src/update/inflate.cpp \
+	src/update/httpsclient.cpp \
+	src/update/circleglue.cpp \
 	src/dosbox-stub/midi_stub.cpp \
 	src/dosbox-stub/posix_stubs.cpp
 
@@ -958,7 +977,8 @@ $(BUILDSTAMP): FORCE
 
 OBJS := $(foreach f,$(APP_SRCS),$(call OBJ_OF,$(f))) \
         $(foreach f,$(DOSBOX_PLATFORM_SRCS) $(DOSBOX_CORE_SRCS),$(call OBJ_OF,$(f))) \
-        $(foreach f,$(DOSBOX_C_SRCS) $(LIBRETRO_COMMON_SRCS),$(call OBJ_OF,$(f)))
+        $(foreach f,$(DOSBOX_C_SRCS) $(LIBRETRO_COMMON_SRCS),$(call OBJ_OF,$(f))) \
+        $(foreach f,$(MBEDTLS_SRCS),$(call OBJ_OF,$(f)))
 
 # Our own code.
 define APP_OBJ_RULE
@@ -994,6 +1014,16 @@ $(DOSBOX_DYNAREC_UNIT): scripts/hostcheck/gen-dynarec-unit.py $(DOSBOX_DIR)/src/
 endif
 
 # DOSBox, plain C (nukedopl.c and the libretro-common encoding helper).
+# Mbed TLS (MBEDTLS_SRCS: empty until make fetch).
+define MBEDTLS_C_OBJ_RULE
+$(call OBJ_OF,$(1)): $(1) $(BUILDSTAMP)
+	@echo "  CC    $(1)"
+	@mkdir -p $$(dir $$@)
+	@$$(CC) $$(CFLAGS_MBEDTLS) -MMD -MP -c -o $$@ $(1)
+endef
+
+$(foreach src,$(MBEDTLS_SRCS),$(eval $(call MBEDTLS_C_OBJ_RULE,$(src))))
+
 define DOSBOX_C_OBJ_RULE
 $(call OBJ_OF,$(1)): $(1) $(BUILDSTAMP)
 	@echo "  CC    $(1)"
@@ -1250,6 +1280,7 @@ check:
 # The host compiler, used only by the tools that need no toolchain.  Not $(CXX):
 # that one may be the ARM cross compiler, and these tools run here.
 HOST_CXX		?= g++
+HOST_CC	?= gcc
 
 check-platform:
 	@sh scripts/hostcheck/setup.sh > /dev/null
@@ -1399,6 +1430,27 @@ check-update:
 		-o build/update_test scripts/hostcheck/update_test.cpp \
 		src/update/updater.cpp src/update/zipfile.cpp src/update/inflate.cpp
 	@build/update_test build/update_test.zip build/update_test_data
+
+# The updater's HTTPS against GitHub for real (needs the network, so it is not
+# in check-host): Mbed TLS built for the PC with BM-DOS's configuration.
+# CERTS=- when a TLS-intercepting proxy is in between.
+CERTS ?= sd/certs/cacert.pem
+.PHONY: check-update-live
+check-update-live:
+	@if [ ! -d "$(MBEDTLS_DIR)/library" ]; then echo "Mbed TLS is not fetched: make fetch"; exit 1; fi
+	@mkdir -p build/host_mbedtls
+	@for c in $(MBEDTLS_DIR)/library/*.c; do \
+		o=build/host_mbedtls/$$(basename $$c .c).o; \
+		[ "$$o" -nt "$$c" ] && [ "$$o" -nt src/update/bmdos_mbedtls_config.h ] && continue; \
+		$(HOST_CC) -O1 -w -I$(MBEDTLS_DIR)/include -Isrc/update \
+			-DMBEDTLS_CONFIG_FILE='"bmdos_mbedtls_config.h"' -c -o $$o $$c || exit 1; \
+	done
+	@$(HOST_CXX) -std=gnu++23 -O1 -Wall -Wextra -Iscripts/hostcheck -I$(MBEDTLS_DIR)/include -Isrc/update \
+		-DMBEDTLS_CONFIG_FILE='"bmdos_mbedtls_config.h"' \
+		-o build/update_live scripts/hostcheck/update_live.cpp \
+		src/update/httpsclient.cpp src/update/updater.cpp src/update/zipfile.cpp src/update/inflate.cpp \
+		build/host_mbedtls/*.o
+	@build/update_live $(CERTS)
 
 # What changed between two USB keyboard reports (key_report.h): a key still
 # held is not pressed again.
@@ -1690,6 +1742,11 @@ fetch:
 		git checkout --quiet $(DOSBOX_REV) && \
 		echo "dosbox-core at $$(git rev-parse --short HEAD)"
 	@echo "pinned revision: $(DOSBOX_REV)"
+	@if [ ! -d "$(MBEDTLS_DIR)/.git" ]; then \
+		mkdir -p $(dir $(MBEDTLS_DIR)); \
+		git clone --quiet --depth 1 --branch $(MBEDTLS_REV) $(MBEDTLS_REPO) $(MBEDTLS_DIR); \
+	fi
+	@echo "mbedtls at $(MBEDTLS_REV) ($$(git -C $(MBEDTLS_DIR) describe --tags 2>/dev/null))"
 	@# The port's patches to dosbox-core (patches/dosbox-core/*.patch), as
 	@# setup.sh does with Circle's: a patch that applies in reverse is already
 	@# there; one that applies neither way stops the build, because building

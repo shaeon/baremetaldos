@@ -167,8 +167,18 @@ paquete anterior, BM-DOS-card.zip / update/BM-DOS-<v>-card.zip).  make
 check-update: 35 casos (escenarios de ZXMC reescritos + dos/, wpa_supplicant,
 kernels de BM-DOS, deflate real con zipfile de Python y CRC), limpio con
 ASan/UBSan.  En APP_SRCS (aún sin usar desde el kernel).
-SIGUIENTE: F2 (HTTPS: mbedtls + httpsclient + circleglue de ZXMC, certs en la
-tarjeta, consulta a GitHub).
+F2 APROBADA (13-nov), EN CURSO: HTTPS.  Hecho: MBEDTLS_REV v3.6.2 (la copia de
+ZXMC es idéntica a la oficial) descargada por make fetch; config
+src/update/bmdos_mbedtls_config.h; httpsclient + circleglue en src/update
+(red como el resto del port); sd/certs/cacert.pem = Mozilla actual (118) + 3
+raíces DigiCert retiradas por antigüedad que GitHub ha usado (NO las retiradas
+por desconfianza), copiado por make-sd.sh a certs/.  ARREGLO de la F1: en la
+tarjeta es dosbox/dosbox.conf (no la raíz) y dosbox/saves/ (partidas) tampoco
+se toca.  check-update-live (red, fuera de check-host; CERTS=- con proxy): API,
+plan B, descarga con redirección y un zip real de 67 entradas, todo bien.
+Tu repo NO tiene releases publicadas todavía (solo etiquetas).
+Kernel compilado con Mbed TLS (108 ficheros, +190 KB); check-host desde cero bien.
+SIGUIENTE: F3 (menú, opciones en boot.conf, aviso al arrancar).
 Preguntas hechas: repositorio por defecto (propuesto shaeon/baremetaldos,
 configurable), numeración de nuestras etiquetas, ficheros protegidos (5 de
 configuración + dos/ entero), sitio en el menú (Sistema), fases F1-F4.
