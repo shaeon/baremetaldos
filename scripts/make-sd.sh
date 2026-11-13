@@ -172,6 +172,33 @@ STAGE="${STAGE:-$(mktemp -d)}"
 # user, so they are never copied here.
 mkdir -p "$STAGE/dosbox/saves" "$STAGE/dosbox/system/soundfonts" "$STAGE/dos"
 
+# A LEEME.txt in each of those folders, so that none is empty: GitHub's
+# artifacts drop empty folders, and the card's base travels between the
+# workflow's jobs as an artifact - a card unzipped from the release had no
+# dos/, so C: did not mount.  (The updater never touches dos/ or
+# dosbox/saves/, so these only reach a new card.)
+cat > "$STAGE/dos/LEEME.txt" <<'EOF'
+Esta carpeta es la unidad C: de DOS (MOUNT C /dos en dosbox/dosbox.conf).
+Pon aquí tus juegos, cada uno en su carpeta: /dos/DOOM/DOOM.EXE ...
+Puedes copiarlos con la tarjeta en el PC, o por la red con el servidor web
+(menú Win+F12, Red).  Puedes borrar este fichero.
+EOF
+cat > "$STAGE/dosbox/saves/LEEME.txt" <<'EOF'
+Aquí guarda DOSBox lo que tiene que guardar fuera de C:.  Las
+actualizaciones desde GitHub no tocan esta carpeta.
+EOF
+cat > "$STAGE/dosbox/system/LEEME.txt" <<'EOF'
+Aquí van los SoundFonts (.sf2) para la música General MIDI: el que se llame
+default.sf2 se usa sin configurar nada; para otro, el menú (Win+F12,
+Sonido) o midiconfig= en dosbox/dosbox.conf.  Y las ROM del Roland MT-32:
+MT32_CONTROL.ROM y MT32_PCM.ROM (o CM32L_CONTROL.ROM y CM32L_PCM.ROM).
+EOF
+cat > "$STAGE/dosbox/system/soundfonts/LEEME.txt" <<'EOF'
+Esta carpeta tiene que existir (DOSBox la recorre al arrancar), pero BM-DOS
+busca los SoundFonts (.sf2) en la carpeta de arriba, dosbox/system/: ponlos
+allí.  No borres esta carpeta.
+EOF
+
 say "Staging into $STAGE"
 
 cp "$KERNEL" "$STAGE/"
