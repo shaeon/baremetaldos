@@ -346,6 +346,17 @@ u8 *ReadPackage (const char *pVersion, unsigned *pSize)
 	{
 		return nullptr;
 	}
+
+	// Room first, as for a download: on this board an exhausted heap does not
+	// return NULL, Circle panics.  The package and the same 48 MB margin must
+	// fit in the heap malloc uses (HEAP_LOW).
+	const size_t nFree = CMemorySystem::Get ()->GetHeapFreeSpace (HEAP_LOW);
+	if (nFree != 0 && nFree < static_cast<size_t> (nSize) + 48u * 1024 * 1024)
+	{
+		snprintf (s_Error, sizeof s_Error, "no hay memoria para leer el paquete (%u MB)",
+			  nSize / (1024 * 1024));
+		return nullptr;
+	}
 	u8 *pZip = static_cast<u8 *> (malloc (nSize));
 	if (pZip != nullptr && !FS.Read (Name, pZip, nSize))
 	{
@@ -397,9 +408,27 @@ void BareUpdateGetInfo (TBareUpdateInfo *pInfo)
 	pInfo->pInterrupted = s_Interrupted;
 }
 
+// One HTTPS session at a time: circleglue.cpp's transport keeps its packet
+// buffer in a static, so a menu query or download started while the boot
+// check is still talking to GitHub would mix the two connections' data.
+static bool BootCheckBusy (void)
+{
+	if (s_bBootCheckRunning)
+	{
+		snprintf (s_Error, sizeof s_Error, "ya se está consultando a GitHub (al arrancar): "
+			  "espera unos segundos");
+		return true;
+	}
+	return false;
+}
+
 boolean BareUpdateCheck (void)
 {
 	s_Error[0] = '\0';
+	if (BootCheckBusy ())
+	{
+		return FALSE;
+	}
 	if (!BareNetSocketsReady ())
 	{
 		snprintf (s_Error, sizeof s_Error, "la red no está conectada (Red)");
@@ -434,11 +463,21 @@ boolean BareUpdateInstall (const char *pVersion, boolean bReplaceConfig, boolean
 	// A package kept in update/ is installed from there; otherwise it is
 	// downloaded - the latest release's.
 	pZip = ReadPackage (pVersion, &nZipSize);
+	if (pZip == nullptr && s_Error[0] != '\0')
+	{
+		snprintf (pSummary, nSummarySize, "No se ha tocado nada: %s.", s_Error);
+		return FALSE;
+	}
 	if (pZip == nullptr)
 	{
 		if (strcmp (pVersion, s_Latest) != 0 || s_LatestURL[0] == '\0')
 		{
 			snprintf (pSummary, nSummarySize, "No está el paquete de la %s en update/.", pVersion);
+			return FALSE;
+		}
+		if (BootCheckBusy ())
+		{
+			snprintf (pSummary, nSummarySize, "Todavía no: %s.", s_Error);
 			return FALSE;
 		}
 		if (!BareNetSocketsReady () || !LoadCerts ())

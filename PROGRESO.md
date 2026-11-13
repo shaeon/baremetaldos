@@ -193,6 +193,20 @@ la X, Paquetes guardados, Buscar al arrancar, Paquetes guardados, Repositorio)
 y título "* hay una versión nueva"; kernel llama BareUpdateInit tras la red.
 Compilado, check-host desde cero bien, commit "update: the setup menu...".  F4: probar en
 placa (hace falta publicar la release v0.80 y luego una v0.81).
+(13-nov, sesión nueva) Los commits "release: BM-DOS 0.80..." y "update: the
+setup menu..." los hizo una sesión cortada y NO se entregaron: revisándolos.
+"release" revisado: bien (BMDOS_VERSION en Makefile, kernel, menú; -sd.zip).
+Arreglo encontrado: make-sd.sh dejaba dos/, dosbox/saves/ y
+dosbox/system/soundfonts/ VACÍAS; los artefactos pierden las carpetas vacías,
+así que el -sd.zip no tendría dos/ (C: no montaría): un LEEME.txt en cada una
+(y en dosbox/system/, donde van .sf2 y ROM).
+"update: the setup menu..." (F3) revisado: bien, salvo dos cosas corregidas
+(commit "update: one HTTPS session at a time..."): Buscar/Instalar no miraban
+si la consulta del arranque seguía (dos sesiones TLS sobre el búfer estático
+de circleglue); ReadPackage reservaba el paquete sin mirar la memoria (panic).
+ENTREGADO como parche encima de afc7d12 (F2 + release 0.80 + F3 + arreglos).
+F4 (placa): publicar la release v0.80 (etiqueta v0.80 -> borrador -> publicar)
+y después una v0.81 para que la 0.80 la encuentre e instale.
 Preguntas hechas: repositorio por defecto (propuesto shaeon/baremetaldos,
 configurable), numeración de nuestras etiquetas, ficheros protegidos (5 de
 configuración + dos/ entero), sitio en el menú (Sistema), fases F1-F4.
