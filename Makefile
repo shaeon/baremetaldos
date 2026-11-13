@@ -631,6 +631,10 @@ APP_SRCS := \
 	src/platform/bare_profile.cpp \
 	src/platform/bare_sdlnet.cpp \
 	src/platform/bare_midi.cpp \
+	src/update/updater.cpp \
+	src/update/updatefs.cpp \
+	src/update/zipfile.cpp \
+	src/update/inflate.cpp \
 	src/dosbox-stub/midi_stub.cpp \
 	src/dosbox-stub/posix_stubs.cpp
 
@@ -1380,6 +1384,22 @@ check-web:
 		-o build/web_util_test scripts/hostcheck/web_util_test.cpp
 	@build/web_util_test
 
+# The updater imported from ZXMetalCircle (src/update/): its install rules
+# with BM-DOS's files, and a zip with real deflate made by Python's zipfile.
+.PHONY: check-update
+check-update:
+	@mkdir -p build/update_test_data
+	@python3 -c "import os,random,zipfile; d='build/update_test_data'; \
+		random.seed(3); \
+		f={'texto.txt':('BM-DOS '*4000).encode(), 'aleatorio.bin':bytes(random.getrandbits(8) for _ in range(70000)), \
+		   'repetido.bin':b'A'*200000, 'sub/vacio.txt':b''}; \
+		[os.makedirs(os.path.dirname(os.path.join(d,k)) or d, exist_ok=True) or open(os.path.join(d,k),'wb').write(v) for k,v in f.items()]; \
+		z=zipfile.ZipFile('build/update_test.zip','w',zipfile.ZIP_DEFLATED); [z.write(os.path.join(d,k),k) for k in f]; z.close()"
+	@$(HOST_CXX) -std=gnu++23 -O1 -Wall -Wextra -Iscripts/hostcheck \
+		-o build/update_test scripts/hostcheck/update_test.cpp \
+		src/update/updater.cpp src/update/zipfile.cpp src/update/inflate.cpp
+	@build/update_test build/update_test.zip build/update_test_data
+
 # What changed between two USB keyboard reports (key_report.h): a key still
 # held is not pressed again.
 .PHONY: check-keys
@@ -1511,7 +1531,7 @@ check-dynarec-hook:
 # config parser.  This is the target to run before a cross build.
 check-host: check-platform check-kernel check-bootconf check-scaling check-dynarec \
             check-coreopts check-resample check-storage check-governor check-portorder \
-            check-dynarec-hook check-midi check-frames check-audio check-scale check-menu check-menu-text check-conf check-web check-keys check-pace check-profile
+            check-dynarec-hook check-midi check-frames check-audio check-scale check-menu check-menu-text check-conf check-web check-keys check-pace check-update check-profile
 print-srcs:
 	@echo $(ALL_SRCS)
 

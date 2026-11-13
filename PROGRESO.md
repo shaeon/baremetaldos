@@ -158,7 +158,17 @@ defecto shaeon/baremetaldos (configurable); protegidos boot.conf, dosbox.conf,
 cmdline.txt, config.txt, wpa_supplicant.conf (el nuevo como .nuevo, con opción
 de usar los nuevos y guardar los del usuario como .bak) y dos/ entera; sección
 "Actualización" en Sistema.  APROBADO: F1 -> F4.
-También pedido: valores por defecto con GUS, MIDI y MPU-401 inteligente.
+También pedido: valores por defecto con GUS, MIDI y MPU-401 inteligente (HECHO,
+commit "defaults: Gravis Ultrasound...").
+F1 HECHA: src/update/ (updater, updatefs, zipfile, inflate, importados de
+ZXMetalCircle 61494ca con su origen en la cabecera; cambios en updater.h:
+lista de configuración BM-DOS, dos/ nunca se toca en lugar de esxdos_i, sin
+paquete anterior, BM-DOS-card.zip / update/BM-DOS-<v>-card.zip).  make
+check-update: 35 casos (escenarios de ZXMC reescritos + dos/, wpa_supplicant,
+kernels de BM-DOS, deflate real con zipfile de Python y CRC), limpio con
+ASan/UBSan.  En APP_SRCS (aún sin usar desde el kernel).
+SIGUIENTE: F2 (HTTPS: mbedtls + httpsclient + circleglue de ZXMC, certs en la
+tarjeta, consulta a GitHub).
 Preguntas hechas: repositorio por defecto (propuesto shaeon/baremetaldos,
 configurable), numeración de nuestras etiquetas, ficheros protegidos (5 de
 configuración + dos/ entero), sitio en el menú (Sistema), fases F1-F4.
