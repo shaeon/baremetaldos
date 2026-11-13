@@ -122,11 +122,18 @@ EOF
 cat > circle/memory.h <<'EOF'
 #pragma once
 #include <circle/types.h>
+#define HEAP_LOW	0
+#define HEAP_HIGH	1
+#define HEAP_ANY	2
+// The free heap a test wants to see (0: Circle "does not know", the check
+// is skipped).  bare_midi.cpp's SoundFont guard reads it.
+extern size_t g_HostHeapFree;
 class CMemorySystem
 {
 public:
 	static CMemorySystem *Get (void);
 	u64 GetMemSize (void) const;
+	size_t GetHeapFreeSpace (int) const { return g_HostHeapFree; }
 };
 EOF
 

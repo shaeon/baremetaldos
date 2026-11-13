@@ -153,6 +153,8 @@ trae, se rehace en nuestro menú).  Nuestro lado: circle-stdlib trae fuentes de
 mbedtls sin compilar; el workflow YA publica release en etiqueta v*
 (BM-DOS-card.zip + kernels).  Etiquetas: shaeon v0.66/v0.67/v0.78; mmoroca
 hasta v0.80 (sus releases no llevan nuestro trabajo).
+DECIDIDO (13-nov): numeración PROPIA (no la de mmoroca).  Faltan: repo por
+defecto, ficheros protegidos, sitio en el menú.
 Preguntas hechas: repositorio por defecto (propuesto shaeon/baremetaldos,
 configurable), numeración de nuestras etiquetas, ficheros protegidos (5 de
 configuración + dos/ entero), sitio en el menú (Sistema), fases F1-F4.
@@ -330,6 +332,13 @@ Choca con lo nuestro: nuestro MIDI es FluidSynth + Munt en el núcleo 1
 dosbox.conf, bare_env.h y bare_sysinfo.cpp también los hemos cambiado.
 Aprovechable: su forma de leer el SoundFont rápido y con reintentos, y la
 guarda de memoria (nuestro FluidSynth carga con fopen/fread de newlib).
+HECHO (13-nov, pedido): lector rápido en las cinco funciones de fichero que
+usa FluidSynth (bare_midi.cpp: bloque propio de 64 KB alineado a 64, _IONBF,
+reintento en trozos de 4 KB), y la guarda de memoria con HEAP_LOW (el montón
+de malloc; upstream usa HEAP_ANY, que en Pi 4/5 suma memoria que malloc no
+usa).  Probado en el PC: lectura exacta byte a byte (32 MB, 358 lecturas
+variadas, saltos, final), guarda que rechaza con 4 MB, carga y suena.  Sin
+probar: el camino de reintento (no se puede provocar un EIO en el PC).
 
 ## Notas técnicas
 

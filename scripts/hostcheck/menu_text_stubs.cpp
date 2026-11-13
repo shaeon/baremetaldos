@@ -63,6 +63,7 @@ CLogger *CLogger::Get (void) { return &s_Logger; }
 void CLogger::Write (const char *, TLogSeverity, const char *, ...) {}
 static CMemorySystem s_Mem;
 CMemorySystem *CMemorySystem::Get (void) { return &s_Mem; }
+size_t g_HostHeapFree = 0;
 u64 CMemorySystem::GetMemSize (void) const { return 4096ULL << 20; }
 int32_t CPU_CycleMax = 600000;
 bool CPU_CycleAutoAdjust = false;

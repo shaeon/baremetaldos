@@ -48,6 +48,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
+#include <circle/memory.h>
 #include <string>
 #include <vector>
 
@@ -95,6 +97,10 @@ baremidi::TSPSCRing<u8, 65536> s_In;		// core 0 -> core 1, MIDI bytes
 baremidi::TSPSCRing<s16, 8192> s_Out;		// core 1 -> core 0, stereo s16
 
 // --- the synthesizer interface ------------------------------------------------
+
+// Blocks of the SoundFont read again in pieces during the current load
+// (default_fopen / safe_fread, below).
+static unsigned s_nSfRetries = 0;
 
 class CBareSynth
 {
@@ -448,13 +454,45 @@ public:
 			return false;
 		}
 
+		// Room first (after mmoroca's v0.80).  On this board an exhausted heap
+		// does not return NULL: Circle keeps a reserve and PANICS - the board
+		// stops.  FluidSynth keeps the samples as 16-bit, about the size of
+		// the file, so the file plus a quarter and 8 MB must be free in the
+		// heap malloc uses: HEAP_LOW (sysconfig.h HEAP_DEFAULT_MALLOC), memory
+		// under 1 GB - NOT HEAP_ANY, which on a Pi 4 or 5 adds the memory above
+		// 1 GB that malloc never touches, and would say "room" with the malloc
+		// heap nearly full.  If Circle answers 0 the check is skipped.
+		unsigned long long nFileSize = 0;
+		if (FILE *pProbe = std::fopen (Path.c_str (), "rb"))
+		{
+			std::fseek (pProbe, 0, SEEK_END);
+			nFileSize = static_cast<unsigned long long> (std::ftell (pProbe));
+			std::fclose (pProbe);
+		}
+		const unsigned long long nFree = CMemorySystem::Get ()->GetHeapFreeSpace (HEAP_LOW);
+		const unsigned long long nNeed = nFileSize + nFileSize / 4 + 8 * 1024 * 1024;
+		if (nFree != 0 && nFileSize != 0 && nFree < nNeed)
+		{
+			MidiNote (LogWarning, "fluidsynth: %s needs %llu MB of memory, %llu MB free: not loaded "
+				  "(a smaller SoundFont, or OPL music)", Path.c_str (),
+				  nNeed / (1024 * 1024), nFree / (1024 * 1024));
+			return false;
+		}
+
+		s_nSfRetries = 0;
+		const unsigned nStart = CTimer::GetClockTicks ();
 		if (fluid_synth_sfload (m_pSynth, Path.c_str (), 1) == FLUID_FAILED)
 		{
 			MidiNote (LogWarning, "fluidsynth: cannot load %s", Path.c_str ());
 			return false;
 		}
+		const unsigned nMs = (CTimer::GetClockTicks () - nStart) / 1000;
 
-		MidiNote (LogNotice, "fluidsynth: %s ready", Path.c_str ());
+		// "N block retries" only when a load needed any: a count that grows
+		// boot after boot, or at the same offset, is the card.
+		MidiNote (LogNotice, "fluidsynth: %s ready (%llu KB in %u ms%s)", Path.c_str (),
+			  nFileSize / 1024, nMs,
+			  s_nSfRetries != 0 ? (", " + std::to_string (s_nSfRetries) + " block retries").c_str () : "");
 		return true;
 	}
 
@@ -536,20 +574,154 @@ extern "C"
 	void fluid_msleep (unsigned int nMsecs)	{ CTimer::SimpleMsDelay (nMsecs); }
 	double fluid_utime (void)		{ return static_cast<double> (CTimer::GetClockTicks ()); }
 
-	void *default_fopen (const char *pPath)	{ return std::fopen (pPath, "rb"); }
-	int default_fclose (void *pHandle)	{ return std::fclose (static_cast<FILE *> (pHandle)) == 0 ? FLUID_OK : FLUID_FAILED; }
-	fluid_long_long_t default_ftell (void *pHandle) { return std::ftell (static_cast<FILE *> (pHandle)); }
+	// --- reading a SoundFont fast (after mmoroca's v0.80, midi_stub.cpp) ---
+	//
+	// FluidSynth reads the SoundFont through these five calls.  Through
+	// newlib's buffered stdio a large fread became one FatFs call per
+	// kilobyte - upstream measured 9863 ms for a 31 MB SoundFont, and 3836 ms
+	// once the bulk went through a 64 KB block of its own, the stream
+	// unbuffered.  The same here: the stream is _IONBF, so one block is one
+	// call down to FatFs, and the block is ALIGNED to 64 bytes, as large
+	// transfers to the SD driver end in DMA and malloc guarantees only 16.
+	// A block that comes back short (on some cards a 64 KB multi-sector read
+	// fails with EIO while small ones go through) is read again in 4 KB
+	// pieces, twice at most; the count goes into the load line.
+
+	constexpr size_t SfBlockSize = 64 * 1024;
+	constexpr size_t SfPieceSize = 4 * 1024;
+
+	struct TSfFile
+	{
+		FILE *pFile;
+		u8 *pRaw;		// what malloc returned
+		u8 *pBlock;		// aligned to 64 bytes inside it
+		long long nBlockStart;	// file offset of pBlock[0]
+		size_t nBlockLen;	// valid bytes in pBlock
+		long long nPos;		// FluidSynth's position
+		long long nSize;
+	};
+
+	bool SfLoadBlock (TSfFile *pSf, long long nStart)
+	{
+		pSf->nBlockStart = nStart;
+		pSf->nBlockLen = 0;
+		if (nStart >= pSf->nSize)
+		{
+			return true;		// past the end: an empty block
+		}
+		const size_t nWant = static_cast<size_t> (std::min<long long> (SfBlockSize, pSf->nSize - nStart));
+
+		if (std::fseek (pSf->pFile, static_cast<long> (nStart), SEEK_SET) == 0
+		    && std::fread (pSf->pBlock, 1, nWant, pSf->pFile) == nWant)
+		{
+			pSf->nBlockLen = nWant;
+			return true;
+		}
+
+		// Short: again, in pieces.
+		for (unsigned nTry = 0; nTry < 2; nTry++)
+		{
+			s_nSfRetries++;
+			std::clearerr (pSf->pFile);
+			size_t nGot = 0;
+			while (nGot < nWant)
+			{
+				const size_t nPiece = std::min (SfPieceSize, nWant - nGot);
+				if (std::fseek (pSf->pFile, static_cast<long> (nStart + static_cast<long long> (nGot)), SEEK_SET) != 0
+				    || std::fread (pSf->pBlock + nGot, 1, nPiece, pSf->pFile) != nPiece)
+				{
+					break;
+				}
+				nGot += nPiece;
+			}
+			if (nGot == nWant)
+			{
+				pSf->nBlockLen = nWant;
+				return true;
+			}
+		}
+		MidiNote (LogError, "SoundFont: cannot read at offset %lld (%s)", nStart,
+			  std::feof (pSf->pFile) ? "file ends there" : "read error");
+		return false;
+	}
+
+	void *default_fopen (const char *pPath)
+	{
+		FILE *pFile = std::fopen (pPath, "rb");
+		if (pFile == nullptr)
+		{
+			return nullptr;
+		}
+		std::setvbuf (pFile, nullptr, _IONBF, 0);
+
+		TSfFile *pSf = new TSfFile {};
+		pSf->pFile = pFile;
+		pSf->pRaw = static_cast<u8 *> (std::malloc (SfBlockSize + 64));
+		if (pSf->pRaw == nullptr)
+		{
+			std::fclose (pFile);
+			delete pSf;
+			return nullptr;
+		}
+		pSf->pBlock = reinterpret_cast<u8 *> ((reinterpret_cast<uintptr> (pSf->pRaw) + 63) & ~static_cast<uintptr> (63));
+		std::fseek (pFile, 0, SEEK_END);
+		pSf->nSize = std::ftell (pFile);
+		pSf->nBlockStart = -1;
+		return pSf;
+	}
+
+	int default_fclose (void *pHandle)
+	{
+		TSfFile *pSf = static_cast<TSfFile *> (pHandle);
+		const int nResult = std::fclose (pSf->pFile) == 0 ? FLUID_OK : FLUID_FAILED;
+		std::free (pSf->pRaw);
+		delete pSf;
+		return nResult;
+	}
+
+	fluid_long_long_t default_ftell (void *pHandle)
+	{
+		return static_cast<TSfFile *> (pHandle)->nPos;
+	}
 
 	int safe_fread (void *pBuf, fluid_long_long_t nCount, void *pHandle)
 	{
-		return std::fread (pBuf, 1, static_cast<size_t> (nCount), static_cast<FILE *> (pHandle))
-			== static_cast<size_t> (nCount) ? FLUID_OK : FLUID_FAILED;
+		TSfFile *pSf = static_cast<TSfFile *> (pHandle);
+		u8 *pOut = static_cast<u8 *> (pBuf);
+		long long nLeft = nCount;
+		while (nLeft > 0)
+		{
+			const bool bInBlock = pSf->nBlockStart >= 0 && pSf->nPos >= pSf->nBlockStart
+					      && pSf->nPos < pSf->nBlockStart + static_cast<long long> (pSf->nBlockLen);
+			if (!bInBlock)
+			{
+				if (!SfLoadBlock (pSf, pSf->nPos) || pSf->nBlockLen == 0)
+				{
+					return FLUID_FAILED;	// error, or past the end
+				}
+			}
+			const size_t nOffset = static_cast<size_t> (pSf->nPos - pSf->nBlockStart);
+			const size_t nTake = static_cast<size_t> (std::min<long long> (nLeft, static_cast<long long> (pSf->nBlockLen - nOffset)));
+			std::memcpy (pOut, pSf->pBlock + nOffset, nTake);
+			pOut += nTake;
+			pSf->nPos += static_cast<long long> (nTake);
+			nLeft -= static_cast<long long> (nTake);
+		}
+		return FLUID_OK;
 	}
 
 	int safe_fseek (void *pHandle, fluid_long_long_t nOffset, int nWhence)
 	{
-		return std::fseek (static_cast<FILE *> (pHandle), static_cast<long> (nOffset), nWhence) == 0
-			? FLUID_OK : FLUID_FAILED;
+		TSfFile *pSf = static_cast<TSfFile *> (pHandle);
+		long long nTo = nWhence == SEEK_SET ? nOffset
+			      : nWhence == SEEK_CUR ? pSf->nPos + nOffset
+			      : pSf->nSize + nOffset;
+		if (nTo < 0 || nTo > pSf->nSize)
+		{
+			return FLUID_FAILED;
+		}
+		pSf->nPos = nTo;
+		return FLUID_OK;
 	}
 }
 
