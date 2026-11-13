@@ -797,6 +797,16 @@ void BareInputPoll (void)
 // What bare_libretro.cpp asks for, once per retro_run()
 // ---------------------------------------------------------------------------
 
+boolean BareInputHasKeyboard (void)
+{
+	return s_pKeyboard != nullptr ? TRUE : FALSE;
+}
+
+unsigned BareInputMice (void)
+{
+	return s_nMice;
+}
+
 boolean BareInputHasGamepad (void)
 {
 	return s_nPads != 0;

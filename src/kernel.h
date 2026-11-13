@@ -140,6 +140,17 @@ private:
 	/// window where the interesting failures are.
 	void Report (const char *pFormat, ...);
 
+	/// \brief A line of the boot screen's first stage, the BIOS-like summary
+	///\t   (board, memory, video, sound, USB, network).  Into the boot log
+	///\t   too, as "POST ...".
+	void Post (const char *pFormat, ...);
+
+	/// \brief From the summary to "Iniciando BM-DOS..." and the timed log.
+	void BootStageTwo (void);
+
+	/// \brief 0: the BIOS-like summary; 1: "Iniciando BM-DOS..." and the log.
+	unsigned m_nBootStage;
+
 	/// \brief Lines of status text written so far.
 	unsigned m_nStatusLine;
 

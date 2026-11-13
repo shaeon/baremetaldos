@@ -56,6 +56,7 @@ void BareVideoRestoreScreen (void) {}
 void BareVideoSaveScreen (void) {}
 void BareVideoSetSharpScaling (boolean) {}
 void BareVideoFooterSetVisible (boolean) {}
+void BareVideoBootFooter (const char *, u32) {}
 boolean BareVideoSharpScaling (void) { return TRUE; }
 boolean BareWebRunning (void) { return TRUE; }
 static CLogger s_Logger;

@@ -138,10 +138,23 @@ void    BareVideoStatus (unsigned nLine, const char *pText);
 ///\t   first line.
 void    BareVideoStatusReset (void);
 
-/// \brief The boot logo: centred on the screen (a quiet boot) or at the top
-///\t   (the full log under it), and the caption under it.  Before the boot
-///\t   screen is drawn; BareVideoStatusReset draws it.
-void    BareVideoSetBootLogo (boolean bCentred, const char *pCaption);
+/// \brief The boot screen's header, like a PC BIOS's: the title and a second
+///\t   line at the top left, the logo at the top right.  Before the boot
+///\t   screen is drawn; BareVideoStatusReset draws it.  The strings are kept
+///\t   (pointers), so they must live as long as the boot screen.
+void    BareVideoSetBootHeader (const char *pTitle, const char *pSubtitle);
+
+/// \brief The boot screen's bottom line ("Pulsa SUPR o F2..."), outside the
+///\t   status column; "" erases it.
+void    BareVideoBootFooter (const char *pText, u32 nColor);
+
+/// \brief The boot screen's second stage: all but the header and the logo is
+///\t   erased, and the status column starts again at its top.
+void    BareVideoBootClearBody (void);
+
+/// \brief BareVideoStatus / BareVideoStatusPrint in a colour (0x00RRGGBB).
+void    BareVideoStatusColor (unsigned nLine, const char *pText, u32 nColor);
+void    BareVideoStatusPrintColor (const char *pText, u32 nColor);
 
 /// \brief TRUE while the overlay is drawing (i.e. the emulator has not taken
 ///\t   the screen yet, or the watchdog has taken it back).
@@ -688,6 +701,10 @@ void    BareInputDeinit (void);
 /// \brief Service USB and turn it into libretro key/mouse state.  Called once
 ///	   per frame by the core's input poll callback.
 void    BareInputPoll (void);
+
+/// \brief What the boot screen lists under USB: a keyboard, how many mice.
+boolean BareInputHasKeyboard (void);
+unsigned BareInputMice (void);
 
 // ---------------------------------------------------------------------------
 // SoC information - bare_sysinfo.cpp

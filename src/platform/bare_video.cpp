@@ -101,14 +101,17 @@ CCharGenerator s_Font;
 // Status text geometry.  Top-left corner, one font height per line, with a
 // one-line gap from the edge.  Fixed, so the position does not depend on the
 // source mode DOSBox happens to be in.
-const unsigned STATUS_X = 8;
+const unsigned STATUS_X = 16;			// the header's left margin too
 // The first status line: below the boot logo (DrawBootLogo sets it).
 unsigned STATUS_TOP = 8;
 
 // The boot logo (boot_logo.h): at the top with the full boot log, in the
 // middle of the screen with a quiet one, like a BIOS's quiet boot.
-bool s_bLogoCentred = false;
-const char *s_pLogoCaption = "";
+// The boot screen's header, like a PC BIOS's: two lines at the top left (the
+// name and version, the credits), the logo at the top right.
+const char *s_pBootTitle = "";
+const char *s_pBootSubtitle = "";
+unsigned s_nLogoLeft = 0;			// x where the logo starts: header text stops before it
 const unsigned PanelMargin = 8;	// gap between the status line and the screen edge
 // No cap: the display is 1080 lines at 16+2 pixels per line, so there is room
 // for sixty.  The old cap of 24 was a guess that turned out to be exactly the
@@ -536,11 +539,37 @@ void FillRect (u32 *pDst, unsigned nPitch, unsigned nX, unsigned nY,
 // Getting this backwards mirrors every character, which is exactly what the
 // first boot showed ("DosBoxCircle" legible in a mirror - the old name, and the boot line says BM-DOS now).  Read the same bit
 // Circle does.
+// The text is UTF-8 (the port's messages are Spanish: "núcleo", "conexión");
+// Circle's 8x16 font is Latin-1, so the two-byte sequences of U+00A0..U+00FF
+// are folded into their Latin-1 byte, and anything else beyond ASCII is drawn
+// as '?'.  nMaxX: no pixel at or right of it (0: the screen's edge).
 void DrawText (u32 *pDst, unsigned nPitch, unsigned nX, unsigned nY,
-	       const char *pText, u32 nColor)
+	       const char *pText, u32 nColor, unsigned nMaxX = 0)
 {
 	const unsigned nCharWidth = s_Font.GetCharWidth ();
 	const unsigned nCharHeight = s_Font.GetCharHeight ();
+	const unsigned nRight = nMaxX != 0 && nMaxX < s_nModeWidth ? nMaxX : s_nModeWidth;
+
+	char Latin1[256];
+	unsigned n = 0;
+	for (const unsigned char *p = reinterpret_cast<const unsigned char *> (pText);
+	     *p != '\0' && n < sizeof Latin1 - 1; p++)
+	{
+		if (*p < 0x80)
+		{
+			Latin1[n++] = static_cast<char> (*p);
+		}
+		else if ((*p == 0xC2 || *p == 0xC3) && (p[1] & 0xC0) == 0x80)
+		{
+			Latin1[n++] = static_cast<char> (((*p & 0x03) << 6) | (p[1] & 0x3F));
+			p++;
+		}
+		else if ((*p & 0xC0) != 0x80)
+		{
+			Latin1[n++] = '?';		// another script, or a broken byte
+		}
+	}
+	Latin1[n] = '\0';
 
 	for (unsigned nLine = 0; nLine < nCharHeight; nLine++)
 	{
@@ -550,13 +579,13 @@ void DrawText (u32 *pDst, unsigned nPitch, unsigned nX, unsigned nY,
 		}
 
 		unsigned nPosX = nX;
-		for (const char *p = pText; *p != '\0'; p++, nPosX += nCharWidth)
+		for (const char *p = Latin1; *p != '\0'; p++, nPosX += nCharWidth)
 		{
 			const u32 nBits = s_Font.GetPixelLine (*p, nLine);
 
 			for (unsigned nBit = 0; nBit < nCharWidth; nBit++)
 			{
-				if (nPosX + nBit >= s_nModeWidth)
+				if (nPosX + nBit >= nRight)
 				{
 					break;
 				}
@@ -581,56 +610,52 @@ void DrawBootLogo (void)
 		return;
 	}
 
-	unsigned nScale = s_nModeHeight / 300;
-	if (nScale < 1) nScale = 1;
-	if (nScale > 4) nScale = 4;
-	while (nScale > 1 && bootlogo::Width * nScale + 32 > s_nModeWidth)
-	{
-		nScale--;
-	}
-	const unsigned nW = bootlogo::Width * nScale;
-	const unsigned nH = bootlogo::Height * nScale;
-	if (nW + 16 > s_nModeWidth || nH + 64 > s_nModeHeight)
-	{
-		STATUS_TOP = 8;			// a screen too small for it: no logo
-		return;
-	}
-
-	const unsigned nCharH = s_Font.GetCharHeight ();
-	const unsigned nBlockH = nH + 12 + nCharH;
-	const unsigned nX = (s_nModeWidth - nW) / 2;
-	const unsigned nY = s_bLogoCentred ? (s_nModeHeight - nBlockH) / 3 : 16;
-
 	u32 *pDst = FrameBufferWords ();
 	const u32 nPitch = s_pFrameBuffer->GetPitch () / 4;
+	const unsigned nCharH = s_Font.GetCharHeight ();
+	const unsigned nLineH = nCharH + 2;
 
-	for (unsigned r = 0; r < bootlogo::Height; r++)
+	// The logo at the top right, at its own size (x2 from 1440 lines up), as
+	// the BIOS of a PC carried its maker's or Energy Star's.  None on a screen
+	// too narrow to keep the header beside it.
+	const unsigned nScale = s_nModeHeight >= 1400 ? 2 : 1;
+	const unsigned nW = bootlogo::Width * nScale;
+	const unsigned nH = bootlogo::Height * nScale;
+	unsigned nLogoBottom = 0;
+	s_nLogoLeft = s_nModeWidth;
+	if (nW + 16 + 32 * s_Font.GetCharWidth () <= s_nModeWidth)
 	{
-		const unsigned char *pRun = bootlogo::Runs + bootlogo::RowOffset[r];
-		unsigned x = 0;
-		while (x < bootlogo::Width)
+		const unsigned nX = s_nModeWidth - nW - 16;
+		const unsigned nY = 16;
+		s_nLogoLeft = nX;
+		nLogoBottom = nY + nH;
+		for (unsigned r = 0; r < bootlogo::Height; r++)
 		{
-			const unsigned nCount = pRun[0];
-			const u32 nColour = bootlogo::Palette[pRun[1]];
-			pRun += 2;
-			if (nColour != 0)		// black is the background
+			const unsigned char *pRun = bootlogo::Runs + bootlogo::RowOffset[r];
+			unsigned x = 0;
+			while (x < bootlogo::Width)
 			{
-				FillRect (pDst, nPitch, nX + x * nScale, nY + r * nScale,
-					  nCount * nScale, nScale, nColour);
+				const unsigned nCount = pRun[0];
+				const u32 nColour = bootlogo::Palette[pRun[1]];
+				pRun += 2;
+				if (nColour != 0)		// black is the background
+				{
+					FillRect (pDst, nPitch, nX + x * nScale, nY + r * nScale,
+						  nCount * nScale, nScale, nColour);
+				}
+				x += nCount;
 			}
-			x += nCount;
 		}
 	}
 
-	// The caption, centred under it.
-	const unsigned nCaptionW = static_cast<unsigned> (strlen (s_pLogoCaption)) * s_Font.GetCharWidth ();
-	if (nCaptionW != 0 && nCaptionW < s_nModeWidth)
-	{
-		DrawText (pDst, nPitch, (s_nModeWidth - nCaptionW) / 2, nY + nH + 12,
-			  s_pLogoCaption, 0x0055FFFF);
-	}
+	// The header at the top left, cut before the logo.
+	const unsigned nTextRight = s_nLogoLeft > 16 ? s_nLogoLeft - 16 : s_nLogoLeft;
+	DrawText (pDst, nPitch, 16, 16, s_pBootTitle, 0x00FFFFFF, nTextRight);
+	DrawText (pDst, nPitch, 16, 16 + nLineH, s_pBootSubtitle, 0x00AAAAAA, nTextRight);
+	const unsigned nHeaderBottom = 16 + 2 * nLineH;
 
-	STATUS_TOP = nY + nBlockH + 20;
+	// The status column below both, one blank line apart.
+	STATUS_TOP = (nLogoBottom > nHeaderBottom ? nLogoBottom : nHeaderBottom) + nLineH;
 }
 
 
@@ -1517,7 +1542,8 @@ unsigned BareVideoStatusLines (void)
 	}
 
 	const unsigned nLineHeight = s_Font.GetCharHeight () + 2;
-	const unsigned nAvailable = s_nModeHeight > STATUS_TOP ? s_nModeHeight - STATUS_TOP : 0;
+	const unsigned nBottom = s_nModeHeight > 2 * nLineHeight + 16 ? s_nModeHeight - 2 * nLineHeight - 16 : 0;
+	const unsigned nAvailable = nBottom > STATUS_TOP ? nBottom - STATUS_TOP : 0;	// the footer's line kept
 	const unsigned nLines = nAvailable / nLineHeight;
 
 	return nLines < STATUS_MAX_LINES ? nLines : STATUS_MAX_LINES;
@@ -1563,13 +1589,18 @@ void BareVideoStatusReset (void)
 	DrawBootLogo ();
 }
 
-void BareVideoSetBootLogo (boolean bCentred, const char *pCaption)
+void BareVideoSetBootHeader (const char *pTitle, const char *pSubtitle)
 {
-	s_bLogoCentred = bCentred != FALSE;
-	s_pLogoCaption = pCaption != nullptr ? pCaption : "";
+	s_pBootTitle = pTitle != nullptr ? pTitle : "";
+	s_pBootSubtitle = pSubtitle != nullptr ? pSubtitle : "";
 }
 
 void BareVideoStatusPrint (const char *pText)
+{
+	BareVideoStatusPrintColor (pText, 0x00FFFFFF);
+}
+
+void BareVideoStatusPrintColor (const char *pText, u32 nColor)
 {
 	if (s_pFrameBuffer == nullptr || pText == nullptr || !s_bStatusEnabled)
 	{
@@ -1597,7 +1628,7 @@ void BareVideoStatusPrint (const char *pText)
 		s_nStatusCursor = nLines - 1;
 	}
 
-	BareVideoStatus (s_nStatusCursor, pText);
+	BareVideoStatusColor (s_nStatusCursor, pText, nColor);
 
 	if (s_nStatusCursor + 1 < nLines)
 	{
@@ -1614,6 +1645,11 @@ void BareVideoStatusPrint (const char *pText)
 }
 
 void BareVideoStatus (unsigned nLine, const char *pText)
+{
+	BareVideoStatusColor (nLine, pText, 0x00FFFFFF);
+}
+
+void BareVideoStatusColor (unsigned nLine, const char *pText, u32 nColor)
 {
 	if (s_pFrameBuffer == nullptr || pText == nullptr || !s_bStatusEnabled)
 	{
@@ -1644,7 +1680,43 @@ void BareVideoStatus (unsigned nLine, const char *pText)
 	FillRect (pDst, nPitch, STATUS_X, nY, s_nModeWidth - STATUS_X,
 		  s_Font.GetCharHeight (), 0x00000000);
 
-	DrawText (pDst, nPitch, STATUS_X, nY, pText, 0x00FFFFFF);
+	DrawText (pDst, nPitch, STATUS_X, nY, pText, nColor);
+}
+
+// The bottom line of the boot screen ("Pulsa SUPR o F2..."), apart from the
+// status column; "" erases it.  The column stops one line above it
+// (BareVideoStatusLines).
+void BareVideoBootFooter (const char *pText, u32 nColor)
+{
+	if (s_pFrameBuffer == nullptr || pText == nullptr || !s_bStatusEnabled)
+	{
+		return;
+	}
+	const unsigned nCharH = s_Font.GetCharHeight ();
+	if (s_nModeHeight < nCharH + 16)
+	{
+		return;
+	}
+	const unsigned nY = s_nModeHeight - nCharH - 16;
+	u32 *pDst = FrameBufferWords ();
+	const u32 nPitch = s_pFrameBuffer->GetPitch () / 4;
+	FillRect (pDst, nPitch, 0, nY, s_nModeWidth, nCharH, 0x00000000);
+	DrawText (pDst, nPitch, 16, nY, pText, nColor);
+}
+
+// The second stage of the boot screen: everything under the header goes, the
+// header and the logo stay, and the column starts again at its top.
+void BareVideoBootClearBody (void)
+{
+	if (s_pFrameBuffer == nullptr || !s_bStatusEnabled || STATUS_TOP >= s_nModeHeight)
+	{
+		return;
+	}
+	u32 *pDst = FrameBufferWords ();
+	const u32 nPitch = s_pFrameBuffer->GetPitch () / 4;
+	FillRect (pDst, nPitch, 0, STATUS_TOP, s_nModeWidth, s_nModeHeight - STATUS_TOP, 0x00000000);
+	s_nStatusCursor = 0;
+	s_bStatusScrolled = false;
 }
 
 void BareVideoFill (u32 nColor)

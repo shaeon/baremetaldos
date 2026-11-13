@@ -46,6 +46,10 @@
 // host can test it (make check-bootconf).  Included before anything reads
 // BOOT_CONFIG or the display defaults, which is right below.
 #include "platform/boot_config.h"
+#include "platform/conf_edit.h"
+
+#include <circle/memory.h>
+#include <string>
 
 // The mixer rate DOSBox is configured for.  Keep this in sync with
 // [mixer] rate= in sd/dosbox.conf; a mismatch is audible as pitch shift.
@@ -76,6 +80,7 @@ CKernel::CKernel (void)
 :	CStdlibAppStdio ("dosbox"),
 	m_nBootLogLevel (2),
 	m_bReportForced (FALSE),
+	m_nBootStage (0),
 	m_nStatusLine (0),
 	m_bDisplayOwned (FALSE)
 {
@@ -216,6 +221,59 @@ void CKernel::Cleanup (void)
 #define DOSBOX_SNAPSHOT "unknown"
 #endif
 
+// ---------------------------------------------------------------------------
+// The boot log on the card: SD:/bmdos-arranque.txt
+// ---------------------------------------------------------------------------
+//
+// Every line of the boot, with the time it happened, kept in memory and
+// written to the card when the boot ends - and again when the network gets an
+// address and when DOS's clock is set, which come later.  It is what to send
+// when the boot is slow or the WiFi takes long: where the time goes, measured
+// on the board itself (13-nov: "revisa el tiempo del arranque y la wifi").
+// Times are the system timer's, in seconds: it counts from the SoC's start, so
+// the firmware's own part is inside the first number.
+
+static std::string s_BootLog;
+static constexpr size_t BootLogMax = 48 * 1024;
+
+static void BootLogAdd (const char *pText)
+{
+	char Stamp[24];
+	const unsigned nCenti = static_cast<unsigned> (BareMicros () / 10000);
+	snprintf (Stamp, sizeof Stamp, "[%3u,%02u] ", nCenti / 100, nCenti % 100);
+	if (s_BootLog.size () + strlen (pText) + 16 < BootLogMax)
+	{
+		s_BootLog += Stamp;
+		s_BootLog += pText;
+		s_BootLog += "\r\n";			// readable with Notepad too
+	}
+}
+
+static void BootLogWrite (void)
+{
+	if (FILE *pFile = fopen ("SD:/bmdos-arranque.txt", "w"))
+	{
+		fwrite (s_BootLog.data (), 1, s_BootLog.size (), pFile);
+		fclose (pFile);
+	}
+}
+
+// What a boot-screen line looks like: the network's in cyan, a failure in
+// red, the rest in the grey of a DOS screen.
+static u32 BootLineColour (const char *pText)
+{
+	if (strncmp (pText, "FAIL", 4) == 0 || strncmp (pText, "ACTUALIZACION SIN", 17) == 0)
+	{
+		return 0x00FF5555;
+	}
+	if (strncmp (pText, "net:", 4) == 0 || strncmp (pText, "red:", 4) == 0
+	    || strncmp (pText, "web:", 4) == 0 || strncmp (pText, "hora:", 5) == 0)
+	{
+		return 0x0055FFFF;
+	}
+	return 0x00AAAAAA;
+}
+
 void CKernel::Report (const char *pFormat, ...)
 {
 	char Buffer[160];
@@ -228,16 +286,76 @@ void CKernel::Report (const char *pFormat, ...)
 	// Always the console: that is what ends up on the serial port for
 	// anyone watching with a cable, and it is the log that survives a hang.
 	CLogger::Get ()->Write (GetKernelName (), LogNotice, "%s", Buffer);
+	BootLogAdd (Buffer);
 
-	// m_nBootLogLevel == 0 silences this port's progress, but never a failure:
-	// a boot that stops because the display mode does not match has to say so on
-	// the screen even when boot_log=off, or the card looks dead.
-	if (!m_bDisplayOwned || (m_nBootLogLevel == 0 && !m_bReportForced))
+	// The first stage of the boot screen is the BIOS-like summary (Post); the
+	// technical lines go to the card and the serial port only - unless one
+	// must be seen: a failure, or a forced line (the display mode).
+	const boolean bMustShow = m_bReportForced || BootLineColour (Buffer) == 0x00FF5555;
+	if (m_nBootStage == 0 && !bMustShow)
 	{
 		return;
 	}
 
-	BareVideoStatusPrint (Buffer);
+	// Only boot_log = auto shows the lines; quiet and off show none of them -
+	// but never hide a failure: a boot that stops because the display mode
+	// does not match has to say so on the screen, or the card looks dead.
+	if (!m_bDisplayOwned || (m_nBootLogLevel < 2 && !bMustShow))
+	{
+		return;
+	}
+
+	// The second stage: each line with its time, as in the file.
+	char Line[176];
+	const unsigned nCenti = static_cast<unsigned> (BareMicros () / 10000);
+	snprintf (Line, sizeof Line, "[%3u,%02u] %s", nCenti / 100, nCenti % 100, Buffer);
+	BareVideoStatusPrintColor (Line, BootLineColour (Buffer));
+}
+
+void CKernel::Post (const char *pFormat, ...)
+{
+	char Buffer[160];
+
+	va_list Args;
+	va_start (Args, pFormat);
+	vsnprintf (Buffer, sizeof Buffer, pFormat, Args);
+	va_end (Args);
+
+	CLogger::Get ()->Write (GetKernelName (), LogNotice, "POST %s", Buffer);
+	std::string Logged = "POST ";
+	Logged += Buffer;
+	BootLogAdd (Logged.c_str ());
+
+	// boot_log = off: the header and the logo only.
+	if (!m_bDisplayOwned || m_nBootLogLevel == 0)
+	{
+		return;
+	}
+	BareVideoStatusPrintColor (Buffer, 0x00AAAAAA);
+}
+
+// From the BIOS-like summary to "Iniciando BM-DOS...": the body of the screen
+// is wiped, header and logo stay, and from here on the boot's lines are shown
+// with their times (boot_log = auto) or not at all (quiet, off).
+void CKernel::BootStageTwo (void)
+{
+	if (m_nBootStage != 0)
+	{
+		return;
+	}
+	m_nBootStage = 1;
+	BootLogAdd ("--- Iniciando BM-DOS ---");
+	if (!m_bDisplayOwned)
+	{
+		return;
+	}
+	BareVideoBootFooter ("", 0);
+	BareVideoBootClearBody ();
+	if (m_nBootLogLevel >= 1)
+	{
+		BareVideoStatusPrintColor ("Iniciando BM-DOS...", 0x00FFFFFF);
+		BareVideoStatusPrintColor ("", 0x00AAAAAA);
+	}
 }
 
 const char *CKernel::PickContent (void) const
@@ -469,10 +587,14 @@ boolean CKernel::Initialize (void)
 
 	// The boot logo, like a PC BIOS's: at the top with the full boot log, in
 	// the middle of the screen with a quiet one (boot_log = quiet | off).
-	static char LogoCaption[80];
-	snprintf (LogoCaption, sizeof LogoCaption, "BM-DOS %s (%s)  -  DOSBox on baremetal Raspberry Pi",
-		  BMDOS_VERSION, BMDOS_COMMIT);
-	BareVideoSetBootLogo (m_nBootLogLevel < 2 ? TRUE : FALSE, LogoCaption);
+	// The boot screen, as a PC's: first a BIOS-like summary under the header,
+	// with the logo at the top right (Post); after the SUPR pause,
+	// "Iniciando BM-DOS..." and the boot's lines with their times
+	// (BootStageTwo).  Every line also goes to SD:/bmdos-arranque.txt.
+	static char BootTitle[64];
+	snprintf (BootTitle, sizeof BootTitle, "BM-DOS BIOS %s (%s)", BMDOS_VERSION, BMDOS_COMMIT);
+	BareVideoSetBootHeader (BootTitle,
+				"(C) 2026 @mmoroca & arena.ai, Shaeon (Carlos Palmero) - DOSBox sobre Raspberry Pi");
 
 	BareVideoStatusReset ();
 	Report ("BM-DOS %s (%s, base %s) - DOSBox on baremetal Raspberry Pi", BMDOS_VERSION,
@@ -496,6 +618,17 @@ boolean CKernel::Initialize (void)
 	BareSysInfoSetCPUMax (Config.nCPUMaxMHz);
 	BareSysInfoSetMode (Config.Mode);
 	BareSysInfoSetPerformance ();
+
+	{
+		unsigned nArmMHz = 0, nCoreMHz = 0, nCelsius = 0;
+		BareSysInfoRefresh ();
+		BareSysInfoGet (&nArmMHz, &nCoreMHz, &nCelsius);
+		Post ("Placa:    %s", BareSysInfoBoardName ());
+		Post ("CPU:      %u núcleos ARM a %u MHz", BareSysInfoCores (), nArmMHz);
+		Post ("Memoria:  %u MB ........ OK",
+		      static_cast<unsigned> (CMemorySystem::Get ()->GetMemSize () / (1024 * 1024)));
+		Post ("Vídeo:    HDMI %ux%u", Config.nWidth, Config.nHeight);
+	}
 
 	// --- audio ------------------------------------------------------------
 	Report ("audio: initialising (%u Hz)", MixerRate);
@@ -534,6 +667,43 @@ boolean CKernel::Initialize (void)
 	// does not start, only means no MT-32 / General MIDI - not a failed boot.
 	Report ("midi: core 1 %s", BareMidiInit (MixerRate) ? "ready" : "not started (no MIDI)");
 
+	// What DOS will have, from dosbox.conf: the cards, the MIDI, C:.
+	{
+		std::string Text;
+		if (FILE *pFile = fopen ("SD:/dosbox/dosbox.conf", "r"))
+		{
+			char Chunk[1024];
+			size_t n;
+			while ((n = fread (Chunk, 1, sizeof Chunk, pFile)) > 0) Text.append (Chunk, n);
+			fclose (pFile);
+		}
+		const bareconf::CConfText Conf (Text, false);
+		std::string SbType = "sb16", Gus = "false", Midi = "none";
+		Conf.Get ("sblaster", "sbtype", &SbType);
+		Conf.Get ("gus", "gus", &Gus);
+		Conf.Get ("midi", "mididevice", &Midi);
+		SbType = bareconf::Lower (SbType);
+		const char *pSb = SbType == "sb1" ? "Sound Blaster 1.0" : SbType == "sb2" ? "Sound Blaster 2.0"
+				: SbType == "sbpro1" ? "Sound Blaster Pro" : SbType == "sbpro2" ? "Sound Blaster Pro 2"
+				: SbType == "sb16" ? "Sound Blaster 16" : SbType == "gb" ? "Game Blaster" : "";
+		std::string Cards = pSb;
+		if (bareconf::Lower (Gus) == "true")
+		{
+			Cards += Cards.empty () ? "" : ", ";
+			Cards += "Gravis Ultrasound";
+		}
+		Post ("Sonido:   %s, %u Hz%s%s", BareAudioDeviceName (), MixerRate,
+		      Cards.empty () ? "" : " - ", Cards.c_str ());
+		Midi = bareconf::Lower (Midi);
+		Post ("MIDI:     %s", Midi == "fluidsynth" ? "General MIDI (FluidSynth, núcleo 1)"
+				      : Midi == "mt32" ? "Roland MT-32 (Munt, núcleo 1)" : "no");
+		const std::string MountC = bareconf::GetMount (Conf, 'C');
+		if (!MountC.empty ())
+		{
+			Post ("Unidad C: %s%s", MountC[0] == '/' ? "SD:" : "", MountC.c_str ());
+		}
+	}
+
 	// --- input ------------------------------------------------------------
 	Report ("input: initialising");
 	if (!BareInputInit ())
@@ -543,6 +713,23 @@ boolean CKernel::Initialize (void)
 	}
 
 	Report ("input: ok");
+	{
+		std::string Usb = BareInputHasKeyboard () ? "teclado" : "sin teclado";
+		const unsigned nMice = BareInputMice ();
+		const unsigned nPads = BareInputGamepads ();
+		char Count[32];
+		if (nMice != 0)
+		{
+			snprintf (Count, sizeof Count, ", %u ratón%s", nMice, nMice > 1 ? "es" : "");
+			Usb += Count;
+		}
+		if (nPads != 0)
+		{
+			snprintf (Count, sizeof Count, ", %u mando%s", nPads, nPads > 1 ? "s" : "");
+			Usb += Count;
+		}
+		Post ("USB:      %s", Usb.c_str ());
+	}
 
 	// DOS's time zone (newlib's TZ), before anything reads the local time.
 	BareNetSetTimeZone (Config.TimeZone);
@@ -563,8 +750,15 @@ boolean CKernel::Initialize (void)
 		const u32 nMask = Config.nPrefix >= 32 ? 0xFFFFFFFFu : ~(0xFFFFFFFFu >> Config.nPrefix);
 		for (unsigned i = 0; i < 4; i++) Net.Mask[i] = static_cast<u8> (nMask >> (24 - 8 * i));
 
+		const boolean bNetStarted = BareNetInit (&Net);
 		Report ("net: %s, %s", Net.Mode == BareNetWiFi ? "WiFi" : "Ethernet",
-			BareNetInit (&Net) ? "arrancando en segundo plano" : BareNetState ());
+			bNetStarted ? "arrancando en segundo plano" : BareNetState ());
+		Post ("Red:      %s, %s", Net.Mode == BareNetWiFi ? "WiFi" : "Ethernet",
+		      bNetStarted ? "conectando en segundo plano" : BareNetState ());
+	}
+	else
+	{
+		Post ("Red:      apagada");
 	}
 
 	// The card's web server: a task that waits for the network by itself.
@@ -608,9 +802,15 @@ boolean CKernel::Initialize (void)
 			BareVideoFill (0x00000000);
 			BareVideoStatusReset ();
 			m_nStatusLine = 0;
+			BootStageTwo ();
 			Report ("setup: cerrado, sigue el arranque");
 		}
 	}
+
+	// The second stage: "Iniciando BM-DOS..." and the timed lines.  The SUPR
+	// line at the bottom (BareMenuBootWindow draws it, with the seconds left)
+	// goes with it.
+	BootStageTwo ();
 
 	// --- the time ------------------------------------------------------------
 	// DOSBox sets DOS's clock when its BIOS starts, and the board has no clock
@@ -673,6 +873,7 @@ boolean CKernel::Initialize (void)
 		const unsigned nMillis = static_cast<unsigned> (BareMicros () / 1000);
 		Report ("arranque: %u,%u s desde el kernel", nMillis / 1000, nMillis % 1000 / 100);
 	}
+	BootLogWrite ();		// again when the network and the clock arrive (Run)
 
 	// ---------------------------------------------------------------------
 	// .65e: the rate at the DOS prompt, and the 1800 MHz nobody asked for
@@ -1421,6 +1622,24 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 		// rebooting the machine, the setup menu): here, between two frames,
 		// where DOSBox is parked at its frame boundary.  If loading it again
 		// fails, the board restarts instead.
+		// The boot log on the card gets the moment the network has an address,
+		// which usually comes after DOS started: the line that says how long
+		// the WiFi took.  Once.
+		{
+			static boolean s_bNetLogged = FALSE;
+			if (!s_bNetLogged && BareNetReady ())
+			{
+				s_bNetLogged = TRUE;
+				TBareNetInfo Info {};
+				BareNetInfo (&Info);
+				char Line[96];
+				snprintf (Line, sizeof Line, "red: conectada, %s (%s)", Info.IP,
+					  BareNetMode () == BareNetWiFi ? "WiFi" : "Ethernet");
+				BootLogAdd (Line);
+				BootLogWrite ();
+			}
+		}
+
 		// The network's time came after DOS started: set DOS's clock now,
 		// between two frames.  Checked once a second.
 		if (!s_bDosClockSet)
@@ -1435,6 +1654,11 @@ CStdlibApp::TShutdownMode CKernel::Run (void)
 					s_bDosClockSet = TRUE;
 					char Now[48];
 					BareNetLocalTime (Now, sizeof Now);
+					std::string Line = "hora: ";
+					Line += Now;
+					Line += " (red), puesta en DOS";
+					BootLogAdd (Line.c_str ());
+					BootLogWrite ();
 					CLogger::Get ()->Write (GetKernelName (), LogNotice, "DOS clock set: %s%s", Now,
 								BareCoreSyncDosClock () ? "" : " (no bios-time-sync.patch)");
 				}

@@ -2825,7 +2825,7 @@ void HandleEvent (const TEvent &Ev)
 		{
 			UpdInstall (Ev.nChoice == 1);
 		}
-		else if (Ev.nId == DlgUpdSaved && !Ev.bCancelled && Ev.nChoice < static_cast<int> (s_nUpdSaved))
+		else if (Ev.nId == DlgUpdSaved && !Ev.bCancelled && Ev.nChoice < s_nUpdSaved)
 		{
 			UpdAskHow (s_UpdSaved[Ev.nChoice]);
 		}
@@ -3149,8 +3149,21 @@ boolean BareMenuBootWindow (unsigned nSeconds)
 	s_bBootWindow.store (true, std::memory_order_release);
 
 	const u64 nEnd = BareMicros () + static_cast<u64> (nSeconds) * 1000000;
+	unsigned nShown = ~0u;
 	while (BareMicros () < nEnd || BareMenuActive ())
 	{
+		// The bottom line of the boot screen, as a BIOS's: the key and the
+		// seconds left, redrawn when the number changes.
+		const u64 nNow = BareMicros ();
+		const unsigned nLeft = nNow < nEnd ? static_cast<unsigned> ((nEnd - nNow + 999999) / 1000000) : 0;
+		if (nLeft != nShown && !BareMenuActive () && !s_bOpenedAtBoot)
+		{
+			nShown = nLeft;
+			char Footer[80];
+			snprintf (Footer, sizeof Footer, "Pulsa SUPR o F2 para entrar en el SETUP   (%u)", nLeft);
+			BareVideoBootFooter (Footer, 0x00FFFF55);
+		}
+
 		if (BareMenuActive ())
 		{
 			s_bOpenedAtBoot = true;

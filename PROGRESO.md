@@ -211,7 +211,10 @@ Preguntas hechas: repositorio por defecto (propuesto shaeon/baremetaldos,
 configurable), numeración de nuestras etiquetas, ficheros protegidos (5 de
 configuración + dos/ entero), sitio en el menú (Sistema), fases F1-F4.
 
-**Arranque estilo PC (usuario, 13-nov) - EN DISEÑO.**  Quiere: arrancar más
+**Arranque estilo PC (usuario, 13-nov) - A y B HECHOS (commit "boot: a PC's
+boot screen..."), pendiente de probar en placa; C (acelerar) espera el
+fichero SD:/bmdos-arranque.txt del usuario.**  Recordatorio: commits SOLO a
+nombre de Shaeon, sin Co-Authored-By (preferencia del usuario).  Quiere: arrancar más
 rápido; en vez del logo como splash, pantalla tipo POST de BIOS con el logo
 BM-DOS en una esquina; tras la pausa de SUPR, "Iniciando BM-DOS..." como MS-DOS
 y debajo el log; revisar el tiempo de arranque y el WiFi (sospecha en la 0.78).
